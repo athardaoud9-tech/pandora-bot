@@ -31,7 +31,7 @@ def save_db(data):
 
 # --- 3. CONFIG DU BOT ---
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
 
@@ -44,62 +44,71 @@ async def on_ready():
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
         seconds = int(error.retry_after)
-        await ctx.send(f"⏳ Calme-toi ! Attends encore **{seconds // 60}min {seconds % 60}s**.")
+        await ctx.send(f"⏳ Attends encore **{seconds // 60}min {seconds % 60}s**.")
     elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ Tu n'as pas les permissions admin.")
+        await ctx.send("❌ Permission insuffisante.")
 
-# --- 5. SYSTÈME DE ROB (VOL) ---
+# --- 5. COMMANDE HELP ---
 @bot.command()
-@commands.cooldown(1, 1800, commands.BucketType.user) # Cooldown de 30 minutes (1800s)
+async def help(ctx):
+    embed = discord.Embed(title="📖 Aide - Pandora", color=0x4b41e6)
+    embed.add_field(name="💰 Économie", value="`!work`, `!daily`, `!bal`, `!rob @membre`", inline=False)
+    embed.add_field(name="🛒 Boutique", value="`!shop`, `!buy <nom>`", inline=False)
+    embed.add_field(name="🛡️ Admin", value="`!give @membre <montant>`, `!tax @membre <montant>`", inline=False)
+    await ctx.send(embed=embed)
+
+# --- 6. COMMANDE TAX (ADMIN) ---
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def tax(ctx, member: discord.Member, amount: int):
+    db = load_db()
+    uid = str(member.id)
+    current_bal = db.get(uid, 0)
+    
+    if current_bal <= 0:
+        return await ctx.send(f"❌ **{member.display_name}** n'a déjà plus d'argent.")
+    
+    tax_amount = min(amount, current_bal) # On ne peut pas taxer plus que ce qu'il a
+    db[uid] = current_bal - tax_amount
+    save_db(db)
+    
+    await ctx.send(f"💸 **L'État a taxé {tax_amount} coins** à **{member.display_name}** !")
+
+# --- 7. SYSTÈME DE ROB (MAX 20%) ---
+@bot.command()
+@commands.cooldown(1, 1800, commands.BucketType.user)
 async def rob(ctx, member: discord.Member):
     if member == ctx.author:
         ctx.command.reset_cooldown(ctx)
-        return await ctx.send("❓ Tu ne peux pas te voler toi-même !")
-
-    db = load_db()
-    stealer = str(ctx.author.id)
-    victim = str(member.id)
+        return await ctx.send("❓ Tu ne peux pas te voler toi-même.")
     
-    victim_bal = db.get(victim, 0)
+    db = load_db()
+    victim_bal = db.get(str(member.id), 0)
     
     if victim_bal < 200:
         ctx.command.reset_cooldown(ctx)
-        return await ctx.send(f"❌ **{member.display_name}** est trop pauvre pour être volé (min. 200 coins).")
-
-    # 50% de chance de réussir
-    success = random.choice([True, False])
+        return await ctx.send(f"❌ **{member.display_name}** est trop pauvre (min. 200 coins).")
     
-    if success:
-        # Vol entre 10% et 30% du solde de la victime
-        stolen_amount = random.randint(int(victim_bal * 0.1), int(victim_bal * 0.3))
-        db[stealer] = db.get(stealer, 0) + stolen_amount
-        db[victim] = victim_bal - stolen_amount
+    if random.choice([True, False]):
+        # Vol entre 5% et 20% du solde maximum
+        stolen = random.randint(int(victim_bal * 0.05), int(victim_bal * 0.20))
+        db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + stolen
+        db[str(member.id)] -= stolen
         save_db(db)
-        await ctx.send(f"🥷 **{ctx.author.display_name}** a volé **{stolen_amount} coins** à **{member.display_name}** !")
+        await ctx.send(f"🥷 Succès ! Tu as dérobé **{stolen} coins** (max 20%) à **{member.display_name}** !")
     else:
-        # Amende de 100 coins si on se fait attraper
         fine = 100
-        db[stealer] = max(0, db.get(stealer, 0) - fine)
+        db[str(ctx.author.id)] = max(0, db.get(str(ctx.author.id), 0) - fine)
         save_db(db)
-        await ctx.send(f"👮 **{ctx.author.display_name}** s'est fait attraper et a payé une amende de **{fine} coins** !")
+        await ctx.send(f"👮 Raté ! Tu as été dénoncé et payes une amende de **{fine} coins**.")
 
-# --- 6. COMMANDES GIVE & ÉCONOMIE ---
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def give(ctx, member: discord.Member, amount: int):
-    db = load_db()
-    uid = str(member.id)
-    db[uid] = db.get(uid, 0) + amount
-    save_db(db)
-    await ctx.send(f"💰 **{amount} coins** donnés à **{member.display_name}**.")
-
+# --- 8. AUTRES COMMANDES ÉCO ---
 @bot.command()
 @commands.cooldown(1, 600, commands.BucketType.user)
 async def work(ctx):
     db = load_db()
-    uid = str(ctx.author.id)
     gain = random.randint(100, 350)
-    db[uid] = db.get(uid, 0) + gain
+    db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + gain
     save_db(db)
     await ctx.send(f"🔨 Tu as gagné **{gain} coins** !")
 
@@ -108,54 +117,20 @@ async def daily(ctx):
     db = load_db()
     uid = str(ctx.author.id)
     key = f"{uid}_last_daily"
-    now = time.time()
-    if now - db.get(key, 0) < 43200: # 12h
-        reste = int(43200 - (now - db.get(key, 0)))
+    if time.time() - db.get(key, 0) < 43200:
+        reste = int(43200 - (time.time() - db.get(key, 0)))
         return await ctx.send(f"⏳ Reviens dans **{reste // 3600}h {(reste % 3600) // 60}min**.")
     gain = random.randint(500, 1000)
     db[uid] = db.get(uid, 0) + gain
-    db[key] = now
+    db[key] = time.time()
     save_db(db)
     await ctx.send(f"🎁 Bonus : **{gain} coins** !")
 
 @bot.command()
-async def balance(ctx):
+async def bal(ctx):
     db = load_db()
     await ctx.send(f"💰 **{ctx.author.display_name}**, solde : **{db.get(str(ctx.author.id), 0)} coins**.")
 
-# --- 7. BIENVENUE & SHOP ---
-@bot.event
-async def on_member_join(member):
-    channel = bot.get_channel(1470176904668516528)
-    if channel:
-        path = "static/images/background.gif"
-        if os.path.exists(path):
-            file = discord.File(path, filename="welcome.gif")
-            embed = discord.Embed(description=f"🦋 Bienvenue {member.mention}", color=0x4b41e6)
-            embed.set_image(url="attachment://welcome.gif")
-            await channel.send(file=file, embed=embed)
-
-@bot.command()
-async def shop(ctx):
-    em = discord.Embed(title="🛒 Boutique", color=0x4b41e6)
-    for it, pr in SHOP_ITEMS.items(): em.add_field(name=it.capitalize(), value=f"💰 {pr}", inline=False)
-    await ctx.send(embed=em)
-
-@bot.command()
-async def buy(ctx, *, item: str):
-    db = load_db()
-    uid = str(ctx.author.id)
-    item = item.lower().strip()
-    if item in SHOP_ITEMS and db.get(uid, 0) >= SHOP_ITEMS[item]:
-        role = discord.utils.find(lambda r: r.name.lower() == item, ctx.guild.roles)
-        if role:
-            db[uid] -= SHOP_ITEMS[item]
-            save_db(db)
-            await ctx.author.add_roles(role)
-            await ctx.send(f"🎉 Rôle **{role.name}** acheté !")
-        else: await ctx.send("Rôle introuvable.")
-    else: await ctx.send("Pas assez de coins ou article inconnu.")
-
-# --- 8. RUN ---
+# --- 9. RUN ---
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
