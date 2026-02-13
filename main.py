@@ -7,7 +7,7 @@ import json
 from flask import Flask
 from threading import Thread
 
-# --- 1. KEEP ALIVE ---
+# --- 1. KEEP ALIVE (Render) ---
 app = Flask('')
 @app.route('/')
 def home(): return "Pandora Online"
@@ -33,7 +33,12 @@ def save_db(data):
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
+# Configuration de la boutique
+SHOP_ITEMS = {
+    "vip": 1000, 
+    "juif": 10000, 
+    "milliardaire": 100000
+}
 
 @bot.event
 async def on_ready():
@@ -48,20 +53,17 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ Tu n'as pas les permissions (Admin) pour faire ça.")
 
-# --- 5. COMMANDE GIVE (ADMINS UNIQUEMENT) ---
+# --- 5. COMMANDE GIVE (ADMINS) ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def give(ctx, member: discord.Member, amount: int):
-    if amount <= 0: return await ctx.send("Le montant doit être positif.")
-    
     db = load_db()
     uid = str(member.id)
     db[uid] = db.get(uid, 0) + amount
     save_db(db)
-    
     await ctx.send(f"💰 **{ctx.author.display_name}** a donné **{amount} coins** à **{member.display_name}** !")
 
-# --- 6. BIENVENUE & DÉPART ---
+# --- 6. BIENVENUE & DÉPART (GIFS 2.5MB) ---
 @bot.event
 async def on_member_join(member):
     channel = bot.get_channel(1470176904668516528)
@@ -84,7 +86,7 @@ async def on_member_remove(member):
             await channel.send(content=f"👋 **{member.display_name}** est parti.", file=file)
         else: await channel.send(f"👋 **{member.display_name}** est parti.")
 
-# --- 7. ÉCONOMIE & JEUX ---
+# --- 7. ÉCONOMIE (WORK & DAILY 12H) ---
 @bot.command()
 @commands.cooldown(1, 600, commands.BucketType.user)
 async def work(ctx):
@@ -115,6 +117,39 @@ async def balance(ctx):
     db = load_db()
     await ctx.send(f"💰 **{ctx.author.display_name}**, solde : **{db.get(str(ctx.author.id), 0)} coins**.")
 
-# --- 8. RUN ---
+# --- 8. SHOP & BUY (CORRIGÉ) ---
+@bot.command()
+async def shop(ctx):
+    em = discord.Embed(title="🛒 Boutique Pandora", color=0x4b41e6)
+    for it, pr in SHOP_ITEMS.items(): 
+        em.add_field(name=it.capitalize(), value=f"💰 {pr} coins", inline=False)
+    await ctx.send(embed=em)
+
+@bot.command()
+async def buy(ctx, *, item: str):
+    db = load_db()
+    uid = str(ctx.author.id)
+    item = item.lower().strip()
+    
+    if item not in SHOP_ITEMS:
+        return await ctx.send(f"❌ L'article **{item}** n'existe pas.")
+    
+    prix = SHOP_ITEMS[item]
+    if db.get(uid, 0) < prix:
+        return await ctx.send(f"❌ Pas assez de coins !")
+    
+    role = discord.utils.find(lambda r: r.name.lower() == item, ctx.guild.roles)
+    if role:
+        try:
+            db[uid] -= prix
+            save_db(db)
+            await ctx.author.add_roles(role)
+            await ctx.send(f"🎉 **{ctx.author.display_name}**, tu as acheté le rôle **{role.name}** !")
+        except:
+            await ctx.send("❌ Erreur : Mets mon rôle tout en haut de la liste des rôles !")
+    else:
+        await ctx.send(f"⚠️ Le rôle **{item}** n'existe pas sur ce serveur.")
+
+# --- 9. RUN ---
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
