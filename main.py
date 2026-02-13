@@ -4,11 +4,10 @@ import os
 import time
 import random
 import json
-import datetime
 from flask import Flask
 from threading import Thread
 
-# --- 1. KEEP ALIVE (Anti-Coupure Render) ---
+# --- 1. KEEP ALIVE ---
 app = Flask('')
 @app.route('/')
 def home(): return "Pandora Online"
@@ -16,7 +15,7 @@ def home(): return "Pandora Online"
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- 2. GESTION BASE DE DONNÉES ---
+# --- 2. BASE DE DONNÉES ---
 DB_FILE = "database.json"
 
 def load_db():
@@ -38,23 +37,31 @@ SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
 
 @bot.event
 async def on_ready():
-    print(f"✅ Pandora est Live et opérationnel")
+    print(f"✅ Pandora est Live")
 
-# --- 4. GESTION DES ERREURS (COOLDOWN) ---
+# --- 4. GESTION DES ERREURS ---
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
         seconds = int(error.retry_after)
-        minutes = seconds // 60
-        sec = seconds % 60
-        if minutes > 0:
-            await ctx.send(f"⏳ Calme-toi **{ctx.author.display_name}** ! Attends encore **{minutes}min {sec}s**.")
-        else:
-            await ctx.send(f"⏳ Calme-toi **{ctx.author.display_name}** ! Attends encore **{sec}s**.")
-    else:
-        print(f"Erreur système : {error}")
+        await ctx.send(f"⏳ Calme-toi ! Attends encore **{seconds // 60}min {seconds % 60}s**.")
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Tu n'as pas les permissions (Admin) pour faire ça.")
 
-# --- 5. BIENVENUE & DÉPART (GIFS) ---
+# --- 5. COMMANDE GIVE (ADMINS UNIQUEMENT) ---
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def give(ctx, member: discord.Member, amount: int):
+    if amount <= 0: return await ctx.send("Le montant doit être positif.")
+    
+    db = load_db()
+    uid = str(member.id)
+    db[uid] = db.get(uid, 0) + amount
+    save_db(db)
+    
+    await ctx.send(f"💰 **{ctx.author.display_name}** a donné **{amount} coins** à **{member.display_name}** !")
+
+# --- 6. BIENVENUE & DÉPART ---
 @bot.event
 async def on_member_join(member):
     channel = bot.get_channel(1470176904668516528)
@@ -65,8 +72,7 @@ async def on_member_join(member):
             file = discord.File(path, filename="welcome.gif")
             embed.set_image(url="attachment://welcome.gif")
             await channel.send(file=file, embed=embed)
-        else:
-            await channel.send(embed=embed)
+        else: await channel.send(embed=embed)
 
 @bot.event
 async def on_member_remove(member):
@@ -76,10 +82,9 @@ async def on_member_remove(member):
         if os.path.exists(path):
             file = discord.File(path, filename="leave.gif")
             await channel.send(content=f"👋 **{member.display_name}** est parti.", file=file)
-        else:
-            await channel.send(f"👋 **{member.display_name}** est parti.")
+        else: await channel.send(f"👋 **{member.display_name}** est parti.")
 
-# --- 6. ÉCONOMIE (WORK & DAILY 12H) ---
+# --- 7. ÉCONOMIE & JEUX ---
 @bot.command()
 @commands.cooldown(1, 600, commands.BucketType.user)
 async def work(ctx):
@@ -96,51 +101,19 @@ async def daily(ctx):
     uid = str(ctx.author.id)
     key = f"{uid}_last_daily"
     now = time.time()
-    cooldown_12h = 43200 # 12 heures en secondes
-    
-    last_claim = db.get(key, 0)
-    if now - last_claim < cooldown_12h:
-        reste = int(cooldown_12h - (now - last_claim))
-        h, m = reste // 3600, (reste % 3600) // 60
-        return await ctx.send(f"⏳ Reviens dans **{h}h {m}min** pour ton prochain bonus.")
-
+    if now - db.get(key, 0) < 43200: # 12h
+        reste = int(43200 - (now - db.get(key, 0)))
+        return await ctx.send(f"⏳ Reviens dans **{reste // 3600}h {(reste % 3600) // 60}min**.")
     gain = random.randint(500, 1000)
     db[uid] = db.get(uid, 0) + gain
     db[key] = now
     save_db(db)
-    await ctx.send(f"🎁 **{ctx.author.display_name}**, tu as reçu **{gain} coins** !")
+    await ctx.send(f"🎁 Bonus : **{gain} coins** !")
 
 @bot.command()
 async def balance(ctx):
     db = load_db()
-    await ctx.send(f"💰 **{ctx.author.display_name}**, tu as **{db.get(str(ctx.author.id), 0)} coins**.")
-
-# --- 7. JEUX & SHOP ---
-@bot.command()
-async def morpion(ctx, adv: discord.Member):
-    # (Logique du morpion simplifiée pour le bloc - utilise ta version précédente si besoin)
-    await ctx.send(f"🎮 Le morpion contre {adv.mention} commence !")
-
-@bot.command()
-async def shop(ctx):
-    em = discord.Embed(title="🛒 Boutique", color=0x4b41e6)
-    for it, pr in SHOP_ITEMS.items(): em.add_field(name=it.capitalize(), value=f"💰 {pr}", inline=False)
-    await ctx.send(embed=em)
-
-@bot.command()
-async def buy(ctx, *, item: str):
-    db = load_db()
-    item = item.lower().strip()
-    if item not in SHOP_ITEMS: return await ctx.send("Article inconnu.")
-    if db.get(str(ctx.author.id), 0) < SHOP_ITEMS[item]: return await ctx.send("Solde insuffisant !")
-    
-    role = discord.utils.find(lambda r: r.name.lower() == item, ctx.guild.roles)
-    if role:
-        db[str(ctx.author.id)] -= SHOP_ITEMS[item]
-        save_db(db)
-        await ctx.author.add_roles(role)
-        await ctx.send(f"🎉 Rôle **{role.name}** obtenu !")
-    else: await ctx.send("Erreur : rôle introuvable sur le serveur.")
+    await ctx.send(f"💰 **{ctx.author.display_name}**, solde : **{db.get(str(ctx.author.id), 0)} coins**.")
 
 # --- 8. RUN ---
 keep_alive()
