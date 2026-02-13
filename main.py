@@ -1,72 +1,84 @@
 import discord
 from discord.ext import commands
-import os
+from discord import app_commands
 import json
-import random
+import os
+import asyncio
+from flask import Flask
+from threading import Thread
 
-# --- CONFIGURATION BASE DE DONNÉES JSON ---
-# Remplace la "db" de Replit qui ne marche pas sur Koyeb
-DB_FILE = 'database.json'
+# --- CONFIGURATION DU SERVEUR WEB POUR RENDER ---
+app = Flask('')
 
-def load_db():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE, 'r') as f:
+@app.route('/')
+def home():
+    return "Pandora Bot is Online!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+# --- CONFIGURATION DU BOT ---
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Chargement de la base de données
+def load_data():
+    try:
+        with open("database.json", "r") as f:
             return json.load(f)
-    return {}
+    except FileNotFoundError:
+        return {}
 
-def save_db(data):
-    with open(DB_FILE, 'w') as f:
+def save_data(data):
+    with open("database.json", "w") as f:
         json.dump(data, f, indent=4)
 
-db = load_db()
+# --- COMMANDES D'ÉCONOMIE ---
 
-# --- SETUP BOT ---
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
+@bot.tree.command(name="daily", description="Reçois ton argent quotidien toutes les 12h")
+@app_commands.checks.cooldown(1, 43200) # 43200 secondes = 12 heures
+async def daily(interaction: discord.Interaction):
+    data = load_data()
+    user_id = str(interaction.user.id)
+    
+    if user_id not in data:
+        data[user_id] = {"balance": 0}
+    
+    reward = 500
+    data[user_id]["balance"] += reward
+    save_data(data)
+    
+    await interaction.response.send_message(f"💰 Tu as reçu tes **{reward}$** quotidiens ! Reviens dans 12h.")
 
-SHOP_ITEMS = {
-    "🎰": 100,
-    "👑": 500
-}
+@bot.tree.command(name="taxe", description="Taxer un membre (Admin seulement)")
+@app_commands.checks.has_permissions(administrator=True)
+async def taxe(interaction: discord.Interaction, membre: discord.Member, montant: int):
+    data = load_data()
+    user_id = str(membre.id)
+    
+    if user_id not in data or data[user_id]["balance"] < montant:
+        await interaction.response.send_message("Ce membre n'a pas assez d'argent pour être taxé de ce montant.", ephemeral=True)
+        return
+    
+    data[user_id]["balance"] -= montant
+    save_data(data)
+    
+    await interaction.response.send_message(f"💸 L'administration a prélevé une taxe de **{montant}$** à {membre.mention} !")
 
 @bot.event
 async def on_ready():
-    print(f'✅ Bot Pandora prêt sur Koyeb !')
-
-# --- SECTION BOUTIQUE ---
-@bot.command()
-async def shop(ctx):
-    em = discord.Embed(title="🛒 Boutique", color=0x4b41e6)
-    for it, pr in SHOP_ITEMS.items():
-        em.add_field(name=it.capitalize(), value=f"💰 {pr}", inline=False)
-    await ctx.send(embed=em)
-
-@bot.command()
-async def buy(ctx, *, role_name: str):
-    n = role_name.lower()
-    u_id = str(ctx.author.id)
-    user_coins = db.get(u_id, 0) #
-
-    if n not in SHOP_ITEMS or user_coins < SHOP_ITEMS[n]:
-        await ctx.send("❌ Tu n'as pas assez de coins ou cet objet n'existe pas.")
-        return
-
-    role = discord.utils.get(ctx.guild.roles, name=role_name)
-    if role:
-        db[u_id] = user_coins - SHOP_ITEMS[n] #
-        save_db(db)
-        await ctx.author.add_roles(role)
-        await ctx.send(f"✅ Rôle **{role.name}** acheté !")
-
-# --- SECTION ADMIN ---
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def addcoins(ctx, member: discord.Member, amount: int):
-    u_id = str(member.id)
-    db[u_id] = db.get(u_id, 0) + amount #
-    save_db(db)
-    await ctx.send(f"✅ **{amount}** coins ajoutés à {member.mention} !")
+    print(f'Connecté en tant que {bot.user.name}')
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(e)
 
 # --- LANCEMENT ---
-# On a supprimé keep_alive() car Koyeb n'en a pas besoin
-bot.run(os.environ.get('TOKEN'))
+keep_alive() # Indispensable pour Render
+token = os.getenv('TOKEN') # Récupère le TOKEN des variables d'environnement
+bot.run(token)
