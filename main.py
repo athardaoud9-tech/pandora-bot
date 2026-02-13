@@ -18,23 +18,22 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# --- 2. GESTION BASE DE DONNÉES (JSON au lieu de Replit DB) ---
+# --- 2. GESTION BASE DE DONNÉES (JSON) ---
 DB_FILE = "database.json"
 
 def load_db():
     if not os.path.exists(DB_FILE):
         with open(DB_FILE, "w") as f: json.dump({}, f)
     with open(DB_FILE, "r") as f:
-        return json.load(f)
+        try: return json.load(f)
+        except: return {}
 
 def save_db(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
 # --- 3. CONFIG DU BOT ---
-intents = discord.Intents.default()
-intents.members = True 
-intents.message_content = True 
+intents = discord.Intents.all() 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
@@ -43,171 +42,116 @@ SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
 async def on_ready():
     print(f"✅ Bot Pandora prêt : {bot.user}")
 
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandOnCooldown):
-        min, sec = divmod(int(error.retry_after), 60)
-        await ctx.send(f"⏳ Calme-toi ! Attends **{min}min {sec}s** avant de recommencer.")
+# --- 4. SYSTÈME DE MORPION (BOUTONS) ---
+class TicTacToeButton(discord.ui.Button["TicTacToe"]):
+    def __init__(self, label: str, row: int, col: int):
+        super().__init__(style=discord.ButtonStyle.secondary, label=label, row=row)
+        self.row_idx, self.col_idx = row, col
 
-# --- 4. BIENVENUE & DEPART ---
+    async def callback(self, interaction: discord.Interaction):
+        view: TicTacToe = self.view
+        if interaction.user != view.current_player:
+            return await interaction.response.send_message("Ce n'est pas ton tour !", ephemeral=True)
+        if self.label != "⬜": return
+
+        symbol = "❌" if view.current_player == view.p1 else "⭕"
+        self.label, self.disabled = symbol, True
+        self.style = discord.ButtonStyle.danger if symbol == "❌" else discord.ButtonStyle.success
+        view.board[self.row_idx][self.col_idx] = symbol
+        view.switch_player()
+
+        winner = view.check_winner()
+        if winner: await view.end_game(winner)
+        elif view.is_full(): await view.end_game(None)
+        await interaction.response.edit_message(content=view.get_display(), view=view)
+
+class TicTacToe(discord.ui.View):
+    def __init__(self, p1, p2):
+        super().__init__(timeout=300)
+        self.p1, self.p2 = p1, p2
+        self.current_player = p1
+        self.board = [[" " for _ in range(3)] for _ in range(3)]
+        for r in range(3):
+            for c in range(3): self.add_item(TicTacToeButton("⬜", r, c))
+
+    def get_display(self):
+        board_str = "\n".join(["".join(c if c != " " else "⬜" for c in r) for r in self.board])
+        return f"🎮 **{self.p1.display_name}** vs **{self.p2.display_name}**\nTour de : **{self.current_player.display_name}**\n```\n{board_str}\n```"
+
+    def switch_player(self): self.current_player = self.p2 if self.current_player == self.p1 else self.p1
+    def is_full(self): return all(c != " " for r in self.board for c in r)
+    def check_winner(self):
+        for r in self.board: 
+            if r[0] == r[1] == r[2] != " ": return r[0]
+        for c in range(3):
+            if self.board[0][c] == self.board[1][c] == self.board[2][c] != " ": return self.board[0][c]
+        if self.board[0][0] == self.board[1][1] == self.board[2][2] != " ": return self.board[0][0]
+        if self.board[0][2] == self.board[1][1] == self.board[2][0] != " ": return self.board[0][2]
+        return None
+
+    async def end_game(self, win):
+        res = f"🏆 **{self.p1.display_name if win == '❌' else self.p2.display_name} a gagné !**" if win else "🤝 Égalité !"
+        for c in self.children: c.disabled = True
+        self.stop()
+        await self.msg.edit(content=self.get_display() + f"\n{res}", view=self)
+
+# --- 5. BIENVENUE & DEPART ---
 @bot.event
 async def on_member_join(member):
     channel = bot.get_channel(1470176904668516528) 
     if channel:
-        path = "static/images/background.gif"
         embed = discord.Embed(description=f"🦋 Bienvenue {member.mention}", color=0x4b41e6)
-        if os.path.exists(path):
-            file = discord.File(path, filename="welcome.gif")
-            embed.set_image(url="attachment://welcome.gif")
-            await channel.send(file=file, embed=embed)
-        else: await channel.send(embed=embed)
+        await channel.send(embed=embed)
 
 @bot.event
 async def on_member_remove(member):
     channel = bot.get_channel(1470177322161147914)
     if channel:
-        path = "static/images/leave.gif"
-        embed = discord.Embed(description=f"👋 {member.display_name} est parti.", color=0xff0000)
-        if os.path.exists(path):
-            file = discord.File(path, filename="leave.gif")
-            embed.set_image(url="attachment://leave.gif")
-            await channel.send(file=file, embed=embed)
-        else: await channel.send(embed=embed)
+        await channel.send(f"👋 **{member.display_name}** nous a quittés.")
 
-# --- 5. ECONOMIE & VOL ---
+# --- 6. ECONOMIE (CORRIGÉ) ---
 @bot.command()
 async def balance(ctx):
     db = load_db()
-    await ctx.send(f"💰 {ctx.author.mention}, tu as **{db.get(str(ctx.author.id), 0)} coins**.")
+    await ctx.send(f"💰 {ctx.author.display_name}, tu as **{db.get(str(ctx.author.id), 0)} coins**.")
 
 @bot.command()
 @commands.cooldown(1, 600, commands.BucketType.user)
 async def work(ctx):
     db = load_db()
-    gain = random.randint(10, 50)
-    u_id = str(ctx.author.id)
-    db[u_id] = db.get(u_id, 0) + gain
+    gain = random.randint(100, 350)
+    uid = str(ctx.author.id)
+    db[uid] = db.get(uid, 0) + gain
     save_db(db)
-    await ctx.send(f"🔨 Tu as gagné **{gain} coins** !")
+    await ctx.send(f"🔨 **{ctx.author.display_name}**, tu as gagné **{gain} coins** !")
 
-@bot.command()
-async def daily(ctx):
-    db = load_db()
-    u_id = str(ctx.author.id)
-    key = f"{u_id}_last_daily"
-    now = time.time()
-    if now - db.get(key, 0) < 86400:
-        await ctx.send(f"⏳ Reviens demain !")
-    else:
-        gain = random.randint(500, 1000)
-        db[u_id] = db.get(u_id, 0) + gain
-        db[key] = now
-        save_db(db)
-        await ctx.send(f"🎁 Cadeau : **{gain} coins** !")
-
-@bot.command()
-@commands.cooldown(1, 1800, commands.BucketType.user)
-async def rob(ctx, member: discord.Member):
-    db = load_db()
-    u_id, t_id = str(ctx.author.id), str(member.id)
-    role_req = discord.utils.get(ctx.guild.roles, name="juif")
-
-    if role_req not in ctx.author.roles:
-        ctx.command.reset_cooldown(ctx)
-        await ctx.send("❌ Seuls les possesseurs du rôle **Juif** peuvent voler !"); return
-    
-    chance = random.randint(1, 100)
-    user_coins = db.get(u_id, 0)
-    target_coins = db.get(t_id, 0)
-
-    if chance <= 20:
-        amende = min(random.randint(100, 500), user_coins)
-        db[u_id] -= amende
-        db[t_id] = db.get(t_id, 0) + amende
-        save_db(db)
-        try:
-            await ctx.author.timeout(datetime.timedelta(minutes=5), reason="Tentative de vol")
-            await ctx.send(f"🚔 **PRISON !** {ctx.author.mention} est en cellule pour 5 min et paie **{amende} coins** d'amende !")
-        except:
-            await ctx.send(f"🚔 **ALERTE !** Tu paies **{amende} coins** d'amende.")
-        return
-
-    if target_coins <= 0:
-        await ctx.send("❌ Rien à voler ici !"); return
-
-    stolen = random.randint(50, min(2000, target_coins))
-    db[u_id] = db.get(u_id, 0) + stolen
-    db[t_id] = db.get(t_id, 0) - stolen
-    save_db(db)
-    await ctx.send(f"💰 **SUCCÈS !** Tu as dérobé **{stolen} coins** !")
-
-# --- 6. CASINO ---
-@bot.command()
-async def roulette(ctx, bet: int, color: str):
-    db = load_db()
-    u_id, color = str(ctx.author.id), color.lower()
-    if color not in ['rouge', 'noir'] or bet <= 0 or db.get(u_id, 0) < bet: return
-    db[u_id] -= bet
-    res = random.choice(['rouge', 'noir'])
-    if color == res:
-        db[u_id] += (bet * 2)
-        await ctx.send(f"🎉 GAGNÉ ! (**{res}**). Gain : **{bet*2}** !")
-    else: await ctx.send(f"💀 PERDU ! C'était **{res}**.")
-    save_db(db)
-
-@bot.command()
-async def blackjack(ctx, bet: int):
-    db = load_db()
-    u_id = str(ctx.author.id)
-    if bet <= 0 or db.get(u_id, 0) < bet: return
-    db[u_id] -= bet
-    save_db(db)
-    
-    deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4
-    random.shuffle(deck)
-    p_h, d_h = [deck.pop(), deck.pop()], [deck.pop(), deck.pop()]
-    
-    def sc(h):
-        s = sum(h)
-        if s > 21 and 11 in h: h.remove(11); h.append(1); return sc(h)
-        return s
-
-    async def msg_bj(f=False):
-        em = discord.Embed(title="🃏 Blackjack", color=0x4b41e6)
-        em.add_field(name=f"Toi ({sc(p_h)})", value=f"{p_h}")
-        em.add_field(name="Dealer", value=f"{d_h if f else [d_h[0], '?']}")
-        return em
-
-    m = await ctx.send(embed=await msg_bj())
-    while sc(p_h) < 21:
-        try:
-            r = await bot.wait_for('message', timeout=20.0, check=lambda x: x.author==ctx.author and x.content.lower() in ['hit','stand'])
-            if r.content.lower() == 'hit': 
-                p_h.append(deck.pop())
-                await m.edit(embed=await msg_bj())
-            else: break
-        except: break
-
-    if sc(p_h) > 21: 
-        await ctx.send("💥 Bust !"); return
-
-    while sc(d_h) < 17: d_h.append(deck.pop())
-    await m.edit(embed=await msg_bj(True))
-    
-    db = load_db() # Recharger pour éviter les conflits
-    if sc(d_h) > 21 or sc(p_h) > sc(d_h):
-        db[u_id] += (bet*2); await ctx.send(f"🏆 Gagné ! (**{bet*2}**)")
-    elif sc(p_h) == sc(d_h): db[u_id] += bet; await ctx.send("🤝 Égalité.")
-    else: await ctx.send("💀 Perdu.")
-    save_db(db)
-
-# --- 7. BOUTIQUE ---
 @bot.command()
 async def shop(ctx):
-    em = discord.Embed(title="🛒 Boutique", color=0x4b41e6)
+    em = discord.Embed(title="🛒 Boutique Pandora", color=0x4b41e6)
     for it, pr in SHOP_ITEMS.items(): em.add_field(name=it.capitalize(), value=f"💰 {pr}", inline=False)
     await ctx.send(embed=em)
 
-# --- 8. RUN ---
+@bot.command()
+async def buy(ctx, *, item: str):
+    db = load_db()
+    item = item.lower().strip()
+    if item not in SHOP_ITEMS: return await ctx.send("Article inconnu.")
+    if db.get(str(ctx.author.id), 0) < SHOP_ITEMS[item]: return await ctx.send("Pas assez de coins !")
+    
+    role = discord.utils.find(lambda r: r.name.lower() == item, ctx.guild.roles)
+    if role:
+        db[str(ctx.author.id)] -= SHOP_ITEMS[item]
+        save_db(db)
+        await ctx.author.add_roles(role)
+        await ctx.send(f"🎉 Rôle **{role.name}** acheté !")
+    else: await ctx.send("Rôle introuvable sur le serveur.")
+
+@bot.command()
+async def morpion(ctx, adv: discord.Member):
+    if adv == ctx.author: return
+    view = TicTacToe(ctx.author, adv)
+    view.msg = await ctx.send(view.get_display(), view=view)
+
+# --- 7. RUN ---
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
