@@ -2,4 +2,3 @@ discord.py
 requests
 Pillow
 flask
-replit
