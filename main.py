@@ -8,16 +8,16 @@ import asyncio
 from flask import Flask
 from threading import Thread
 
-# --- 1. KEEP ALIVE (POUR REPLIT/HOSTING) ---
+# --- 1. KEEP ALIVE ---
 app = Flask('')
 @app.route('/')
-def home(): return "Pandora Casino V4 est en ligne !"
+def home(): return "Pandora Casino V5 Ultimate est en ligne !"
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- 2. BASE DE DONNÉES & UTILITAIRES ---
+# --- 2. BASE DE DONNÉES ---
 DB_FILE = "database.json"
-TAX_RATE = 0.05 # 5% de taxe sur les échanges (!give)
+TAX_RATE = 0.05 # 5% de taxe sur les échanges entre joueurs
 
 def load_db():
     if not os.path.exists(DB_FILE):
@@ -43,126 +43,272 @@ def parse_amount(amount_str, balance):
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# CONFIGURATION JEUX & SALONS
-WELCOME_CHANNEL_ID = 1470176904668516528 
-LEAVE_CHANNEL_ID = 1470177322161147914
-SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
-SLOT_SYMBOLS = ["🍒", "🍋", "🍇", "🔔", "💎", "7️⃣"]
-SLOT_WEIGHTS = [30, 25, 20, 15, 8, 2] 
+# --- 4. CLASSES DE JEUX ---
 
-race_open = False
-race_bets = [] 
-
-@bot.event
-async def on_ready():
-    await bot.tree.sync()
-    print(f"✅ Pandora V4 est prêt !")
-
-# --- 4. CLASSES D'INTERFACE (VIEWS) ---
-
-# --- NOUVEAU JEU : HIGH / LOW ---
-class HighLowView(discord.ui.View):
-    def __init__(self, author, amount, db):
-        super().__init__(timeout=60)
-        self.author = author
+# === BLACKJACK AMÉLIORÉ ===
+class BlackjackView(discord.ui.View):
+    def __init__(self, author_id, amount, db):
+        super().__init__(timeout=120)
+        self.author_id = author_id
         self.amount = amount
         self.db = db
-        self.current_number = random.randint(1, 100)
-        self.embed = None # Sera défini après l'envoi
+        self.deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 'J', 'Q', 'K', 'A'] * 4
+        self.player_hand = [self.draw(), self.draw()]
+        self.dealer_hand = [self.draw(), self.draw()]
+        self.ended = False
 
-    def get_embed(self, status="En attente...", color=0x4b41e6):
-        emb = discord.Embed(title="📈 High or Low ?", description=f"Mise : **{self.amount} coins**", color=color)
-        emb.add_field(name="Nombre Actuel", value=f"# **{self.current_number}**", inline=False)
-        emb.add_field(name="Ton choix", value="Le prochain nombre sera-t-il plus **grand** ou plus **petit** ?", inline=False)
-        emb.set_footer(text=status)
-        return emb
+    def draw(self):
+        return random.choice(self.deck)
 
-    async def end_game(self, interaction, won, next_num):
-        uid = str(self.author.id)
+    def calculate_score(self, hand):
+        score = 0
+        aces = 0
+        for card in hand:
+            if isinstance(card, int): score += card
+            elif card in ['J', 'Q', 'K']: score += 10
+            elif card == 'A': 
+                score += 11
+                aces += 1
+        while score > 21 and aces > 0:
+            score -= 10
+            aces -= 1
+        return score
+
+    def format_hand(self, hand, hide_second=False):
+        txt = ""
+        for i, card in enumerate(hand):
+            if hide_second and i == 1: txt += "[🎴]"
+            else: txt += f"[`{card}`] "
+        return txt
+
+    async def update_message(self, interaction, result_msg=None, color=0x4b41e6, hide_dealer=True):
+        p_score = self.calculate_score(self.player_hand)
+        d_score = self.calculate_score(self.dealer_hand)
+        
+        embed = discord.Embed(title="🃏 BlackJack", color=color)
+        embed.add_field(name=f"👤 Ta main ({p_score})", value=self.format_hand(self.player_hand), inline=False)
+        
+        if hide_dealer:
+            embed.add_field(name="🎩 Croupier", value=self.format_hand(self.dealer_hand, hide_second=True), inline=False)
+        else:
+            embed.add_field(name=f"🎩 Croupier ({d_score})", value=self.format_hand(self.dealer_hand, hide_second=False), inline=False)
+
+        if result_msg:
+            embed.add_field(name="Résultat", value=result_msg, inline=False)
+            embed.set_footer(text=f"Mise : {self.amount} coins")
+
+        if not interaction.response.is_done():
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.message.edit(embed=embed, view=self)
+
+    @discord.ui.button(label="Tirer (Hit)", style=discord.ButtonStyle.primary, emoji="➕")
+    async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id: return
+        self.player_hand.append(self.draw())
+        score = self.calculate_score(self.player_hand)
+        
+        if score > 21:
+            self.ended = True
+            for child in self.children: child.disabled = True
+            # Perdu : L'argent est déjà retiré au lancement, on ne fait rien
+            await self.update_message(interaction, "💥 **BUST !** Tu as dépassé 21. Perdu.", 0xff0000, hide_dealer=False)
+        else:
+            await self.update_message(interaction)
+
+    @discord.ui.button(label="Rester (Stand)", style=discord.ButtonStyle.secondary, emoji="🛑")
+    async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id: return
+        self.ended = True
         for child in self.children: child.disabled = True
         
-        if won:
+        # Le croupier joue
+        while self.calculate_score(self.dealer_hand) < 17:
+            self.dealer_hand.append(self.draw())
+        
+        p_score = self.calculate_score(self.player_hand)
+        d_score = self.calculate_score(self.dealer_hand)
+        
+        uid = str(self.author_id)
+        
+        if d_score > 21:
+            msg = "🎉 Le Croupier a sauté ! **Tu gagnes !**"
+            win = True
+        elif p_score > d_score:
+            msg = "🎉 Ton score est meilleur ! **Tu gagnes !**"
+            win = True
+        elif p_score == d_score:
+            msg = "🤝 Égalité ! Mise remboursée."
+            self.db[uid] = self.db.get(uid, 0) + self.amount
+            save_db(self.db)
+            await self.update_message(interaction, msg, 0xFFA500, hide_dealer=False)
+            return
+        else:
+            msg = f"❌ Le Croupier a {d_score}. **Tu perds.**"
+            win = False
+
+        if win:
             gain = self.amount * 2
             self.db[uid] = self.db.get(uid, 0) + gain
+            save_db(self.db)
             color = 0x00ff00
-            msg = f"🎉 GAGNÉ ! Le nombre était **{next_num}**. Tu gagnes +{gain - self.amount} coins."
+            msg += f"\n💰 +{gain} coins"
         else:
-            # L'argent est déjà retiré au lancement, on ne fait rien
             color = 0xff0000
-            msg = f"❌ PERDU... Le nombre était **{next_num}**."
-        
-        save_db(self.db)
-        emb = discord.Embed(title="📈 High or Low - Fin", description=msg, color=color)
-        emb.add_field(name="Nombre de départ", value=str(self.current_number))
-        emb.add_field(name="Nombre d'arrivée", value=str(next_num))
-        await interaction.response.edit_message(embed=emb, view=self)
 
-    @discord.ui.button(label="Plus Grand (High)", style=discord.ButtonStyle.success, emoji="⬆️")
-    async def high(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author: return
-        next_num = random.randint(1, 100)
-        if next_num == self.current_number: next_num += 1 # Pas d'égalité parfaite
-        await self.end_game(interaction, next_num > self.current_number, next_num)
+        await self.update_message(interaction, msg, color, hide_dealer=False)
 
-    @discord.ui.button(label="Plus Petit (Low)", style=discord.ButtonStyle.danger, emoji="⬇️")
-    async def low(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author: return
-        next_num = random.randint(1, 100)
-        if next_num == self.current_number: next_num -= 1
-        await self.end_game(interaction, next_num < self.current_number, next_num)
-
-# --- NOUVELLE INTERFACE DICE ---
-class DiceView(discord.ui.View):
-    def __init__(self, author, amount, db):
+# === MORPION (TICTACTOE) CORRIGÉ ===
+class MorpionGame(discord.ui.View):
+    def __init__(self, p1, p2, amount):
         super().__init__(timeout=60)
-        self.author = author
+        self.p1 = p1
+        self.p2 = p2
         self.amount = amount
-        self.db = db
+        self.turn = p1
+        self.board = [0] * 9
+        # Ajout des boutons 3x3
+        for i in range(9):
+            self.add_item(MorpionButton(i))
 
-    @discord.ui.button(label="🎲 Lancer les dés", style=discord.ButtonStyle.primary)
-    async def roll(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.author: return
+    async def game_over(self, interaction, winner=None):
+        for child in self.children: child.disabled = True
+        db = load_db()
         
-        player_roll = [random.randint(1, 6), random.randint(1, 6)]
-        bot_roll = [random.randint(1, 6), random.randint(1, 6)]
-        p_sum = sum(player_roll)
-        b_sum = sum(bot_roll)
-        uid = str(self.author.id)
+        if winner:
+            pot = self.amount * 2
+            db[str(winner.id)] = db.get(str(winner.id), 0) + pot
+            save_db(db)
+            embed = discord.Embed(title="🎮 Morpion - Fin", description=f"🏆 **{winner.mention} remporte la victoire !**\n💰 Gain : **{pot} coins**", color=0x00ff00)
+        else:
+            # Match nul = Remboursement
+            db[str(self.p1.id)] = db.get(str(self.p1.id), 0) + self.amount
+            db[str(self.p2.id)] = db.get(str(self.p2.id), 0) + self.amount
+            save_db(db)
+            embed = discord.Embed(title="🎮 Morpion - Fin", description="🤝 **Match Nul !**\nVos mises ont été remboursées.", color=0xFFA500)
+            
+        await interaction.response.edit_message(embed=embed, view=self)
+        self.stop()
 
-        embed = discord.Embed(title="🎲 Duel de Dés", color=0x4b41e6)
-        embed.add_field(name=f"Toi ({p_sum})", value=f"{player_roll[0]} + {player_roll[1]}", inline=True)
-        embed.add_field(name=f"Bot ({b_sum})", value=f"{bot_roll[0]} + {bot_roll[1]}", inline=True)
+class MorpionButton(discord.ui.Button):
+    def __init__(self, index):
+        super().__init__(style=discord.ButtonStyle.secondary, label="➖", row=index//3)
+        self.index = index
+
+    async def callback(self, interaction: discord.Interaction):
+        view: MorpionGame = self.view
+        if interaction.user != view.turn:
+            return await interaction.response.send_message("Ce n'est pas ton tour !", ephemeral=True)
+        
+        # Marquer la case
+        symbol = "❌" if view.turn == view.p1 else "⭕"
+        self.style = discord.ButtonStyle.danger if view.turn == view.p1 else discord.ButtonStyle.success
+        self.label = symbol
+        self.disabled = True
+        view.board[self.index] = 1 if view.turn == view.p1 else 2
+        
+        # Vérifier victoire
+        b = view.board
+        wins = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+        for x,y,z in wins:
+            if b[x] == b[y] == b[z] != 0:
+                return await view.game_over(interaction, view.turn)
+        
+        if 0 not in b: # Plein
+            return await view.game_over(interaction, None)
+
+        # Changer tour
+        view.turn = view.p2 if view.turn == view.p1 else view.p1
+        await interaction.response.edit_message(content=f"Au tour de {view.turn.mention}", view=view)
+
+class MorpionInvite(discord.ui.View):
+    def __init__(self, p1, p2, amount):
+        super().__init__(timeout=60)
+        self.p1 = p1; self.p2 = p2; self.amount = amount
+
+    @discord.ui.button(label="Accepter le Duel", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.p2: return
+        
+        db = load_db()
+        id1, id2 = str(self.p1.id), str(self.p2.id)
+        if db.get(id1, 0) < self.amount or db.get(id2, 0) < self.amount:
+            return await interaction.response.edit_message(content="❌ L'un des joueurs n'a plus assez d'argent.", view=None)
+
+        # On prélève l'argent MAINTENANT
+        db[id1] -= self.amount
+        db[id2] -= self.amount
+        save_db(db)
+
+        await interaction.response.edit_message(content=f"🎮 **Duel lancé !** {self.p1.mention} commence.", view=MorpionGame(self.p1, self.p2, self.amount))
+
+    @discord.ui.button(label="Refuser", style=discord.ButtonStyle.danger)
+    async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.p2: return
+        await interaction.response.edit_message(content=f"🚫 {self.p2.mention} a refusé le duel.", view=None)
+
+# === DICE AVEC ANIMATION ===
+class DiceView(discord.ui.View):
+    def __init__(self, author, amount):
+        super().__init__(timeout=60)
+        self.author = author; self.amount = amount; self.clicked = False
+
+    @discord.ui.button(label="🎲 Lancer !", style=discord.ButtonStyle.primary)
+    async def roll(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.author or self.clicked: return
+        self.clicked = True
+        
+        p_roll = [random.randint(1,6), random.randint(1,6)]
+        b_roll = [random.randint(1,6), random.randint(1,6)]
+        p_sum = sum(p_roll); b_sum = sum(b_roll)
+
+        db = load_db(); uid = str(self.author.id)
+        embed = discord.Embed(title="🎲 Résultats des Dés", color=0x4b41e6)
+        embed.add_field(name="Toi", value=f"`{p_roll[0]}` + `{p_roll[1]}` = **{p_sum}**")
+        embed.add_field(name="Bot", value=f"`{b_roll[0]}` + `{b_roll[1]}` = **{b_sum}**")
 
         if p_sum > b_sum:
             gain = self.amount * 2
-            self.db[uid] = self.db.get(uid, 0) + gain
+            db[uid] = db.get(uid, 0) + gain
             embed.color = 0x00ff00
-            embed.description = f"🎉 **Tu gagnes !** +{gain - self.amount} coins net."
+            embed.description = f"🎉 **VICTOIRE !** Tu remportes {gain - self.amount} coins !"
         elif p_sum < b_sum:
             embed.color = 0xff0000
-            embed.description = f"❌ **Le Bot gagne.** Tu perds ta mise."
+            embed.description = "❌ **DÉFAITE.** Le bot gagne."
         else:
-            self.db[uid] = self.db.get(uid, 0) + self.amount # Remboursement
-            embed.description = "🤝 **Égalité !** Mise remboursée."
+            db[uid] = db.get(uid, 0) + self.amount
+            embed.color = 0xFFA500
+            embed.description = "🤝 **ÉGALITÉ.** Mise remboursée."
         
-        save_db(self.db)
-        for child in self.children: child.disabled = True
+        save_db(db)
+        button.disabled = True
+        button.label = "Terminé"
         await interaction.response.edit_message(embed=embed, view=self)
 
-# --- 5. COMMANDES DE JEUX ---
+# --- 5. COMMANDES JEUX ---
 
-@bot.command(aliases=["hl", "plusoumoins"])
-async def hilo(ctx, amount_str: str):
+@bot.command()
+async def blackjack(ctx, amount_str: str):
     db = load_db(); uid = str(ctx.author.id)
     amount = parse_amount(amount_str, db.get(uid, 0))
-    if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent.")
+    if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Tu n'as pas assez d'argent.")
 
-    # On retire la mise tout de suite
     db[uid] -= amount
     save_db(db)
+    
+    view = BlackjackView(ctx.author.id, amount, db)
+    await view.update_message(ctx) # Envoie le message initial
 
-    view = HighLowView(ctx.author, amount, db)
-    await ctx.send(embed=view.get_embed(), view=view)
+@bot.command()
+async def morpion(ctx, member: discord.Member, amount_str: str):
+    if member.bot or member == ctx.author: return await ctx.send("❌ Impossible de jouer contre un bot ou toi-même.")
+    db = load_db(); uid = str(ctx.author.id)
+    amount = parse_amount(amount_str, db.get(uid, 0))
+    
+    if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Tu n'as pas assez d'argent.")
+    
+    embed = discord.Embed(title="⚔️ Défi Morpion", description=f"{ctx.author.mention} défie {member.mention} pour **{amount} coins** !", color=0xFFFF00)
+    await ctx.send(member.mention, embed=embed, view=MorpionInvite(ctx.author, member, amount))
 
 @bot.command()
 async def dice(ctx, amount_str: str):
@@ -173,132 +319,8 @@ async def dice(ctx, amount_str: str):
     db[uid] -= amount
     save_db(db)
     
-    view = DiceView(ctx.author, amount, db)
-    embed = discord.Embed(title="🎲 Duel de Dés", description=f"Mise : **{amount} coins**\nClique ci-dessous pour lancer !", color=0x4b41e6)
-    await ctx.send(embed=embed, view=view)
-
-# --- 6. SYSTÈME ÉCONOMIE & TAXES ---
-
-@bot.command()
-async def daily(ctx):
-    db = load_db(); uid = str(ctx.author.id); key = f"{uid}_last_daily"
-    # Cooldown de 12h pour le daily
-    if time.time() - db.get(key, 0) < 43200: 
-        return await ctx.send("⏳ Reviens plus tard pour ton daily.")
-    
-    # REWARD ALEATOIRE 1000 - 5000
-    gain = random.randint(1000, 5000)
-    
-    db[uid] = db.get(uid, 0) + gain
-    db[key] = time.time()
-    save_db(db)
-    await ctx.send(f"🎁 **Daily !** Tu as reçu **{gain} coins** aujourd'hui !")
-
-@bot.command()
-@commands.cooldown(1, 600, commands.BucketType.user) # 600 secondes = 10 minutes
-async def work(ctx):
-    db = load_db()
-    gain = random.randint(100, 350)
-    db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + gain
-    save_db(db)
-    await ctx.send(f"🔨 Tu as travaillé dur et gagné **{gain} coins** !")
-
-@bot.command()
-async def give(ctx, member: discord.Member, amount_str: str):
-    if member.bot or member.id == ctx.author.id: return await ctx.send("❌ Impossible.")
-    
-    db = load_db()
-    u_send = str(ctx.author.id)
-    u_recv = str(member.id)
-    
-    amount = parse_amount(amount_str, db.get(u_send, 0))
-    if amount <= 0 or db.get(u_send, 0) < amount: return await ctx.send("❌ Fonds insuffisants.")
-
-    # CALCUL TAXE
-    tax_amount = int(amount * TAX_RATE)
-    final_amount = amount - tax_amount
-
-    db[u_send] -= amount
-    db[u_recv] = db.get(u_recv, 0) + final_amount
-    save_db(db)
-    
-    await ctx.send(f"💸 **{ctx.author.display_name}** envoie {amount} coins à {member.mention}.\n📉 **Taxe (5%)** : -{tax_amount} coins.\n✅ **Reçu** : {final_amount} coins.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def tax(ctx, member: discord.Member, amount_str: str):
-    """Commande Admin pour retirer de l'argent (Impôts/Amende)"""
-    db = load_db()
-    uid = str(member.id)
-    amount = parse_amount(amount_str, db.get(uid, 0))
-    
-    if amount <= 0: return await ctx.send("❌ Montant invalide.")
-    
-    db[uid] = max(0, db.get(uid, 0) - amount)
-    save_db(db)
-    await ctx.send(f"👮 **IMPÔTS :** L'État (Admin) a prélevé **{amount} coins** à {member.mention}.")
-
-@bot.command(aliases=["admingive"])
-@commands.has_permissions(administrator=True)
-async def admin_give(ctx, member: discord.Member, amount: int):
-    db = load_db(); uid = str(member.id)
-    db[uid] = db.get(uid, 0) + amount
-    save_db(db)
-    await ctx.send(f"👑 **ADMIN GIVE:** +{amount} pour {member.mention}.")
-
-# --- 7. RESTE DES COMMANDES (Course, Slot, Morpion...) ---
-# (J'ai gardé ton code existant pour Race, Slot, etc. et je l'intègre ici)
-
-@bot.command()
-async def race(ctx):
-    global race_open, race_bets
-    if race_open: return await ctx.send("🏇 Course déjà en cours !")
-    race_open = True; race_bets = []
-    
-    await ctx.send("🏇 **Course ouverte !** `!bet <mise> <cheval 1-5>` (30s)")
-    await asyncio.sleep(30)
-    
-    if not race_bets: race_open = False; return await ctx.send("❌ Course annulée (0 paris).")
-    
-    msg = await ctx.send("🚫 **Paris fermés !** Départ..."); await asyncio.sleep(1)
-    await msg.edit(content="🏇 🏇 🏇 ..."); await asyncio.sleep(2)
-    
-    winner = random.randint(1, 5)
-    db = load_db(); winners_txt = []
-    
-    for b in race_bets:
-        if b['horse'] == winner:
-            gain = b['amount'] * 2
-            db[str(b['user'])] = db.get(str(b['user']), 0) + gain
-            
-            # Check Role Dompteur
-            w_key = f"{b['user']}_race_wins"
-            db[w_key] = db.get(w_key, 0) + 1
-            if db[w_key] >= 10:
-                mem = ctx.guild.get_member(b['user'])
-                r = discord.utils.get(ctx.guild.roles, name="Dompteur de chevaux")
-                if mem and r: await mem.add_roles(r)
-            
-            winners_txt.append(f"<@{b['user']}> (+{gain})")
-
-    save_db(db); race_open = False; race_bets = []
-    res = ", ".join(winners_txt) if winners_txt else "Personne !"
-    await ctx.send(f"🏁 Le cheval **#{winner}** gagne ! Bravo : {res}")
-
-@bot.command()
-async def bet(ctx, amount_str: str, horse: int):
-    global race_open, race_bets
-    if not race_open: return
-    db = load_db(); uid = str(ctx.author.id)
-    amount = parse_amount(amount_str, db.get(uid, 0))
-    if amount <= 0 or db.get(uid, 0) < amount: return
-    
-    for b in race_bets:
-        if b['user'] == ctx.author.id: return await ctx.send("❌ Déjà parié.")
-
-    db[uid] -= amount; save_db(db)
-    race_bets.append({'user': ctx.author.id, 'amount': amount, 'horse': horse})
-    await ctx.send(f"✅ Pari de **{amount}** sur le **#{horse}** accepté.")
+    embed = discord.Embed(title="🎲 Dice", description=f"Mise : **{amount} coins**\nClique sur le bouton pour lancer.", color=0x4b41e6)
+    await ctx.send(embed=embed, view=DiceView(ctx.author, amount))
 
 @bot.command()
 async def slot(ctx, amount_str: str):
@@ -306,80 +328,139 @@ async def slot(ctx, amount_str: str):
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent.")
     
-    items = random.choices(SLOT_SYMBOLS, weights=SLOT_WEIGHTS, k=3)
-    mult = 0
-    if items[0] == items[1] == items[2]:
-        mult = {"7️⃣":100, "💎":50, "🔔":20, "🍇":10, "🍋":5, "🍒":3}[items[0]]
-    elif items[0] == items[1] or items[1] == items[2] or items[0] == items[2]: mult = 1.5
+    symbols = ["🍒", "🍋", "🍇", "🔔", "💎", "7️⃣"]
+    weights = [30, 25, 20, 15, 8, 2]
+    res = random.choices(symbols, weights=weights, k=3)
     
-    s_key = f"{uid}_slot_streak"
+    mult = 0
+    if res[0] == res[1] == res[2]:
+        mult = {"7️⃣":100, "💎":50, "🔔":20, "🍇":10, "🍋":5, "🍒":3}[res[0]]
+    elif res[0] == res[1] or res[1] == res[2] or res[0] == res[2]: mult = 1.5
+
+    embed = discord.Embed(title="🎰 Machine à Sous", color=0x4b41e6)
+    desc = f"**»** ┃ {res[0]} ┃ {res[1]} ┃ {res[2]} ┃ **«**\n\n"
+    
     if mult > 0:
-        gain = int(amount * mult); profit = gain - amount
-        db[uid] += profit
-        db[s_key] = db.get(s_key, 0) + 1
-        res = f"🎉 **GAGNÉ !** +{gain} coins."
-        if db[s_key] >= 7:
-            r = discord.utils.get(ctx.guild.roles, name="Hakari")
-            if r: await ctx.author.add_roles(r); res += "\n🕺 **JACKPOT HAKARI !**"
+        gain = int(amount * mult)
+        db[uid] += (gain - amount)
+        embed.color = 0x00ff00
+        desc += f"🎉 **GAGNÉ !** x{mult} -> **+{gain} coins**"
     else:
-        db[uid] -= amount; db[s_key] = 0; res = "❌ **PERDU.**"
+        db[uid] -= amount
+        embed.color = 0xff0000
+        desc += f"❌ **PERDU** -{amount} coins"
     
     save_db(db)
-    await ctx.send(embed=discord.Embed(title="🎰 Slots", description=f"┃ {items[0]} ┃ {items[1]} ┃ {items[2]} ┃\n\n{res}", color=0xFFD700))
+    embed.description = desc
+    await ctx.send(embed=embed)
 
-# --- AUTRES COMMANDES (ROB, BAL, SHOP) ---
+# --- 6. ÉCONOMIE & ADMIN ---
+
 @bot.command()
-async def rob(ctx, member: discord.Member):
-    if member == ctx.author: return
-    db = load_db(); v_bal = db.get(str(member.id), 0)
-    if v_bal < 200: return await ctx.send("❌ Trop pauvre.")
-    if random.choice([True, False]):
-        stolen = random.randint(int(v_bal * 0.05), int(v_bal * 0.20))
-        db[str(ctx.author.id)] += stolen; db[str(member.id)] -= stolen
-        save_db(db); await ctx.send(f"🥷 **Volé :** {stolen} coins !")
-    else:
-        db[str(ctx.author.id)] = max(0, db.get(str(ctx.author.id), 0) - 100)
-        save_db(db); await ctx.send("👮 **Échec !** Tu paies 100 coins d'amende.")
+@commands.cooldown(1, 600, commands.BucketType.user)
+async def work(ctx):
+    gain = random.randint(100, 500)
+    db = load_db()
+    db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + gain
+    save_db(db)
+    await ctx.send(f"🔨 Tu as travaillé et gagné **{gain} coins** !")
+
+@bot.command()
+async def daily(ctx):
+    db = load_db(); uid = str(ctx.author.id); key = f"{uid}_daily"
+    if time.time() - db.get(key, 0) < 43200:
+        remaining = 43200 - (time.time() - db.get(key, 0))
+        h, m = divmod(remaining, 3600)
+        return await ctx.send(f"⏳ Reviens dans {int(h)}h {int(m//60)}m.")
+    
+    gain = random.randint(1000, 5000)
+    db[uid] = db.get(uid, 0) + gain
+    db[key] = time.time()
+    save_db(db)
+    await ctx.send(f"🎁 **Bonus Quotidien !** Tu reçois **{gain} coins** !")
+
+@bot.command()
+async def give(ctx, member: discord.Member, amount_str: str):
+    if member.bot or member == ctx.author: return
+    db = load_db(); uid = str(ctx.author.id); tid = str(member.id)
+    amount = parse_amount(amount_str, db.get(uid, 0))
+    
+    if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Fonds insuffisants.")
+    
+    tax = int(amount * TAX_RATE)
+    final = amount - tax
+    
+    db[uid] -= amount
+    db[tid] = db.get(tid, 0) + final
+    save_db(db)
+    
+    embed = discord.Embed(title="💸 Transfert", color=0x00ff00)
+    embed.add_field(name="Envoyé", value=str(amount))
+    embed.add_field(name="Taxe (5%)", value=str(tax))
+    embed.add_field(name="Reçu", value=str(final))
+    await ctx.send(f"{ctx.author.mention} a payé {member.mention}", embed=embed)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def tax(ctx, member: discord.Member, amount_str: str):
+    """Retire de l'argent à un joueur (Admin)"""
+    db = load_db(); uid = str(member.id)
+    amount = parse_amount(amount_str, db.get(uid, 0)) # On permet "all" aussi
+    
+    current = db.get(uid, 0)
+    if amount > current: amount = current # On ne peut pas taxer plus qu'il n'a
+    
+    db[uid] = current - amount
+    save_db(db)
+    
+    await ctx.send(f"👮 **TAXE** : L'administrateur a saisi **{amount} coins** à {member.mention}.\nNouveau solde : {db[uid]}")
+
+@bot.command(name="admin-give")
+@commands.has_permissions(administrator=True)
+async def admin_give(ctx, member: discord.Member, amount: int):
+    db = load_db(); uid = str(member.id)
+    db[uid] = db.get(uid, 0) + amount
+    save_db(db)
+    await ctx.send(f"👑 **Don Admin** : +{amount} coins pour {member.mention}")
 
 @bot.command()
 async def bal(ctx, member: discord.Member = None):
-    t = member if member else ctx.author; db = load_db()
-    await ctx.send(f"💰 **{t.display_name}** : {db.get(str(t.id), 0)} coins")
+    target = member or ctx.author
+    db = load_db()
+    embed = discord.Embed(title="💰 Banque", description=f"Solde de {target.mention} : **{db.get(str(target.id), 0)} coins**", color=0xFFD700)
+    await ctx.send(embed=embed)
 
 @bot.command()
-async def shop(ctx):
-    e = discord.Embed(title="🛒 Shop", color=0x4b41e6)
-    for k,v in SHOP_ITEMS.items(): e.add_field(name=k, value=str(v))
+async def helpme(ctx):
+    e = discord.Embed(title="Aide Pandora V5", color=0x4b41e6)
+    e.add_field(name="🎮 Jeux", value="`!blackjack`, `!morpion`, `!dice`, `!slot`\n*Supportent 'all' comme mise*", inline=False)
+    e.add_field(name="💰 Argent", value="`!work` (10min), `!daily` (12h), `!give`, `!bal`", inline=False)
+    e.add_field(name="👮 Admin", value="`!tax @user <montant>`, `!admin-give`", inline=False)
     await ctx.send(embed=e)
 
-@bot.command()
-async def buy(ctx, *, item: str):
-    db = load_db(); item = item.lower()
-    if item not in SHOP_ITEMS: return
-    p = SHOP_ITEMS[item]; uid = str(ctx.author.id)
-    if db.get(uid, 0) >= p:
-        r = discord.utils.find(lambda x: x.name.lower() == item, ctx.guild.roles)
-        if r: 
-            await ctx.author.add_roles(r)
-            db[uid] -= p; save_db(db); await ctx.send(f"✅ Acheté : {r.name}")
-        else: await ctx.send("❌ Rôle introuvable.")
-    else: await ctx.send("❌ Pas assez d'argent.")
-
-@bot.command(name="helpme")
-async def helpme(ctx):
-    em = discord.Embed(title="Aide Pandora V4", color=0x4b41e6)
-    em.add_field(name="🎰 Jeux", value="`!hilo <mise>` (Nouveau!)\n`!dice <mise>` (Bouton)\n`!slot`, `!race`", inline=False)
-    em.add_field(name="💰 Éco", value="`!work` (10min)\n`!daily` (1k-5k)\n`!give` (Taxe 5%)", inline=False)
-    await ctx.send(embed=em)
-
-# --- GESTION DES ERREURS ---
+# --- 7. GESTION DES ERREURS & COOLDOWN (FIX) ---
 @bot.event
 async def on_command_error(ctx, error):
+    # Fix: Affiche le message à chaque fois
     if isinstance(error, commands.CommandOnCooldown):
+        # Convertir le temps en format lisible
         m, s = divmod(error.retry_after, 60)
-        await ctx.send(f"⏳ **Cooldown !** Reviens dans {int(m)}m {int(s)}s.", delete_after=5)
+        h, m = divmod(m, 60)
+        
+        if h > 0: time_fmt = f"{int(h)}h {int(m)}m {int(s)}s"
+        elif m > 0: time_fmt = f"{int(m)}m {int(s)}s"
+        else: time_fmt = f"{int(s)}s"
+        
+        emb = discord.Embed(title="⏳ Doucement !", description=f"Tu dois attendre encore **{time_fmt}** avant de refaire cette commande.", color=0xFFA500)
+        await ctx.send(embed=emb, delete_after=10)
+        
     elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ Tu n'as pas la permission.")
+        await ctx.send("🚫 Tu n'as pas la permission.", delete_after=5)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("❌ Commande incomplète. Vérifie la syntaxe.", delete_after=5)
+    else:
+        # Pour le debug, on affiche les autres erreurs dans la console uniquement
+        print(f"Erreur : {error}")
 
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
