@@ -33,112 +33,100 @@ def save_db(data):
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-SHOP_ITEMS = {"vip": 1000, "juif": 10000, "milliardaire": 100000}
+# Dictionnaire du shop bien défini en haut
+SHOP_ITEMS = {
+    "vip": 1000, 
+    "juif": 10000, 
+    "milliardaire": 100000
+}
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ Pandora est Live")
 
-# --- 4. GESTION DES ERREURS (FIX COOLDOWN) ---
-@bot.event
-async def on_command_error(ctx, error):
-    # On vérifie si l'erreur est un Cooldown
-    if isinstance(error, commands.CommandOnCooldown):
-        # On n'envoie le message que si c'est la première fois (Discord gère souvent les doublons)
-        seconds = int(error.retry_after)
-        minutes = seconds // 60
-        secs = seconds % 60
-        await ctx.send(f"⏳ **Cooldown !** Reviens dans **{minutes}m {secs}s**.", delete_after=10)
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ Tu n'as pas les permissions admin.")
+# --- 4. COMMANDE GIVE (POUR TOUS - VIREMENT) ---
+@bot.command(name="give")
+async def give_player(ctx, member: discord.Member, amount: int):
+    if amount <= 0:
+        return await ctx.send("❌ Montant invalide.")
+    if member == ctx.author:
+        return await ctx.send("❓ Tu ne peux pas te donner à toi-même.")
 
-# --- 5. COMMANDE BUY (FIX : ACHAT UNIQUE) ---
+    db = load_db()
+    uid = str(ctx.author.id)
+    target_id = str(member.id)
+    
+    if db.get(uid, 0) < amount:
+        return await ctx.send("❌ Tu n'as pas assez de coins.")
+
+    db[uid] -= amount
+    db[target_id] = db.get(target_id, 0) + amount
+    save_db(db)
+    await ctx.send(f"💸 **{ctx.author.display_name}** a donné **{amount} coins** à **{member.display_name}** !")
+
+# --- 5. COMMANDE ADMIN-GIVE (POUR ADMINS - GÉNÉRER) ---
+@bot.command(name="admin-give")
+@commands.has_permissions(administrator=True)
+async def admin_give(ctx, member: discord.Member, amount: int):
+    db = load_db()
+    db[str(member.id)] = db.get(str(member.id), 0) + amount
+    save_db(db)
+    await ctx.send(f"👑 **ADMIN**: **{amount} coins** ajoutés au compte de **{member.display_name}**.")
+
+# --- 6. COMMANDE SHOP (AFFICHAGE FIXÉ) ---
+@bot.command()
+async def shop(ctx):
+    embed = discord.Embed(
+        title="🛒 Boutique Pandora",
+        description="Utilise `!buy <nom>` pour acheter un grade.",
+        color=0x4b41e6
+    )
+    # On boucle sur le dictionnaire pour être sûr qu'il s'affiche
+    for name, price in SHOP_ITEMS.items():
+        embed.add_field(name=name.upper(), value=f"💰 Price: {price} coins", inline=False)
+    
+    await ctx.send(embed=embed)
+
+# --- 7. COMMANDE BUY ---
 @bot.command()
 async def buy(ctx, *, item: str):
     db = load_db()
     uid = str(ctx.author.id)
-    item = item.lower().strip()
+    item_clean = item.lower().strip()
     
-    if item not in SHOP_ITEMS:
-        return await ctx.send("❌ Cet article n'existe pas.")
-    
-    prix = SHOP_ITEMS[item]
-    
-    # Trouver le rôle sur le serveur
-    role = discord.utils.find(lambda r: r.name.lower() == item, ctx.guild.roles)
-    
+    if item_clean not in SHOP_ITEMS:
+        return await ctx.send("❌ Article inconnu.")
+
+    price = SHOP_ITEMS[item_clean]
+    role = discord.utils.find(lambda r: r.name.lower() == item_clean, ctx.guild.roles)
+
     if not role:
-        return await ctx.send(f"⚠️ Le rôle **{item}** n'existe pas sur ce serveur.")
-
-    # VERIFICATION : Si l'utilisateur a déjà le rôle
+        return await ctx.send("⚠️ Erreur: Le rôle n'existe pas sur Discord.")
     if role in ctx.author.roles:
-        return await ctx.send(f"❌ Tu possèdes déjà le rôle **{role.name}** !")
+        return await ctx.send("❌ Déjà possédé.")
+    if db.get(uid, 0) < price:
+        return await ctx.send("❌ Pas assez de coins.")
 
-    # Vérification du solde
-    if db.get(uid, 0) < prix:
-        return await ctx.send(f"❌ Il te manque **{prix - db.get(uid, 0)} coins** !")
-    
-    try:
-        db[uid] -= prix
-        save_db(db)
-        await ctx.author.add_roles(role)
-        await ctx.send(f"🎉 Félicitations **{ctx.author.display_name}**, tu as acheté **{role.name}** !")
-    except discord.Forbidden:
-        await ctx.send("❌ Je n'ai pas la permission de donner ce rôle (vérifie ma position dans la liste des rôles).")
+    db[uid] -= price
+    save_db(db)
+    await ctx.author.add_roles(role)
+    await ctx.send(f"🎉 Tu as acheté le grade **{role.name}** !")
 
-# --- 6. AUTRES COMMANDES (ROB, GIVE, TAX, etc.) ---
-@bot.command()
-@commands.cooldown(1, 1800, commands.BucketType.user)
-async def rob(ctx, member: discord.Member):
-    if member == ctx.author:
-        ctx.command.reset_cooldown(ctx)
-        return await ctx.send("❓ Impossible.")
-    db = load_db()
-    v_bal = db.get(str(member.id), 0)
-    if v_bal < 200:
-        ctx.command.reset_cooldown(ctx)
-        return await ctx.send("❌ Cible trop pauvre.")
-    
-    if random.choice([True, False]):
-        stolen = random.randint(int(v_bal * 0.05), int(v_bal * 0.20))
-        db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + stolen
-        db[str(member.id)] -= stolen
-        save_db(db)
-        await ctx.send(f"🥷 Tu as volé **{stolen} coins** !")
-    else:
-        db[str(ctx.author.id)] = max(0, db.get(str(ctx.author.id), 0) - 100)
-        save_db(db)
-        await ctx.send("👮 Amende de **100 coins** !")
-
+# --- 8. AUTRES (BAL, HELP) ---
 @bot.command()
 async def bal(ctx):
     db = load_db()
     await ctx.send(f"💰 **{ctx.author.display_name}**, solde : **{db.get(str(ctx.author.id), 0)} coins**.")
 
 @bot.command()
-@commands.cooldown(1, 600, commands.BucketType.user)
-async def work(ctx):
-    db = load_db()
-    gain = random.randint(100, 350)
-    db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + gain
-    save_db(db)
-    await ctx.send(f"🔨 Tu as gagné **{gain} coins** !")
+async def help(ctx):
+    em = discord.Embed(title="Aide Pandora", color=0x4b41e6)
+    em.add_field(name="💰 Éco", value="`!work`, `!daily`, `!bal`, `!give @membre <montant>`", inline=False)
+    em.add_field(name="🛒 Shop", value="`!shop`, `!buy <nom>`", inline=False)
+    em.add_field(name="🛡️ Admin", value="`!admin-give @membre <montant>`, `!tax @membre <montant>`", inline=False)
+    await ctx.send(embed=em)
 
-@bot.command()
-async def daily(ctx):
-    db = load_db()
-    uid = str(ctx.author.id)
-    key = f"{uid}_last_daily"
-    if time.time() - db.get(key, 0) < 43200:
-        reste = int(43200 - (time.time() - db.get(key, 0)))
-        return await ctx.send(f"⏳ Reviens dans **{reste // 3600}h {(reste % 3600) // 60}min**.")
-    gain = random.randint(500, 1000)
-    db[uid] = db.get(uid, 0) + gain
-    db[key] = time.time()
-    save_db(db)
-    await ctx.send(f"🎁 +**{gain} coins** !")
-
-# --- 7. RUN ---
+# --- 9. RUN ---
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
