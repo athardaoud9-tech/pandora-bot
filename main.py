@@ -33,8 +33,9 @@ def save_db(data):
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# ID DU SALON DE BIENVENUE (Remplace par le tien si ça a changé)
-WELCOME_CHANNEL_ID = 1470176904668516528 
+# --- CONFIGURATION DES SALONS ---
+WELCOME_CHANNEL_ID = 1470176904668516528  # Salon Bienvenue
+LEAVE_CHANNEL_ID = 1470177322161147914    # Salon Départs
 
 SHOP_ITEMS = {
     "vip": 1000, 
@@ -47,12 +48,11 @@ async def on_ready():
     await bot.tree.sync()
     print(f"✅ Pandora est connecté et prêt !")
 
-# --- 4. SYSTEME BIENVENUE & AU REVOIR ---
+# --- 4. SYSTEME BIENVENUE & DEPART ---
 @bot.event
 async def on_member_join(member):
     channel = bot.get_channel(WELCOME_CHANNEL_ID)
     if channel:
-        # Chemin vers ton GIF de bienvenue
         file_path = "static/images/background.gif"
         if os.path.exists(file_path):
             file = discord.File(file_path, filename="welcome.gif")
@@ -60,13 +60,12 @@ async def on_member_join(member):
             embed.set_image(url="attachment://welcome.gif")
             await channel.send(embed=embed, file=file)
         else:
-            await channel.send(f"Bienvenue {member.mention} ! (GIF introuvable)")
+            await channel.send(f"Bienvenue {member.mention} !")
 
 @bot.event
 async def on_member_remove(member):
-    channel = bot.get_channel(WELCOME_CHANNEL_ID)
+    channel = bot.get_channel(LEAVE_CHANNEL_ID)
     if channel:
-        # Chemin vers ton GIF de départ
         file_path = "static/images/leave.gif"
         if os.path.exists(file_path):
             file = discord.File(file_path, filename="leave.gif")
@@ -108,7 +107,6 @@ class TicTacToeView(discord.ui.View):
         self.board = [[0, 0, 0] for _ in range(3)]
         for y in range(3):
             for x in range(3): self.add_item(TicTacToeButton(x, y))
-
     def check_winner(self):
         b = self.board
         for i in range(3):
@@ -126,13 +124,11 @@ class BlackjackView(discord.ui.View):
         self.deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11] * 4
         self.player_hand = [self.draw(), self.draw()]
         self.dealer_hand = [self.draw(), self.draw()]
-
     def draw(self): return random.choice(self.deck)
     def score(self, hand):
         s = sum(hand); n_aces = hand.count(11)
         while s > 21 and n_aces > 0: s -= 10; n_aces -= 1
         return s
-
     async def end_game(self, interaction, result_msg, win_mult):
         for child in self.children: child.disabled = True
         uid = str(self.author_id)
@@ -141,12 +137,10 @@ class BlackjackView(discord.ui.View):
             save_db(self.db)
             color = 0x00ff00
         else: color = 0xff0000
-        
         embed = discord.Embed(title="🃏 Blackjack", description=result_msg, color=color)
         embed.add_field(name="Toi", value=f"{self.player_hand} ({self.score(self.player_hand)})")
         embed.add_field(name="Croupier", value=f"{self.dealer_hand} ({self.score(self.dealer_hand)})")
         await interaction.response.edit_message(embed=embed, view=self)
-
     @discord.ui.button(label="Tirer", style=discord.ButtonStyle.primary)
     async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author_id: return
@@ -157,7 +151,6 @@ class BlackjackView(discord.ui.View):
             embed.add_field(name="Toi", value=f"{self.player_hand} ({self.score(self.player_hand)})")
             embed.add_field(name="Croupier", value=f"[{self.dealer_hand[0]}, ?]")
             await interaction.response.edit_message(embed=embed, view=self)
-
     @discord.ui.button(label="Rester", style=discord.ButtonStyle.secondary)
     async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author_id: return
@@ -171,7 +164,7 @@ class BlackjackView(discord.ui.View):
 # --- 6. COMMANDES JEUX ---
 @bot.command()
 async def morpion(ctx, member: discord.Member):
-    if member.bot or member == ctx.author: return await ctx.send("Adversaire invalide.")
+    if member.bot or member == ctx.author: return
     await ctx.send(f"🎮 {ctx.author.mention} vs {member.mention}", view=TicTacToeView(ctx.author, member))
 
 @bot.command()
@@ -191,10 +184,9 @@ async def roulette(ctx, amount: int, choice: str):
     if choice not in ["noir", "rouge"]: return await ctx.send("❌ `!roulette <mise> rouge/noir`")
     db = load_db(); uid = str(ctx.author.id)
     if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent.")
-    
     colors = ["rouge", "noir"]; result = random.choice(colors)
     if choice == result:
-        db[uid] += amount; save_db(db) # Gagne sa mise (donc +mise au total)
+        db[uid] += amount; save_db(db)
         await ctx.send(f"🎰 **{result.upper()}** ! Tu gagnes **{amount} coins** !")
     else:
         db[uid] -= amount; save_db(db)
@@ -207,17 +199,17 @@ async def rob(ctx, member: discord.Member):
     if member == ctx.author: return
     db = load_db(); v_bal = db.get(str(member.id), 0)
     if v_bal < 200: ctx.command.reset_cooldown(ctx); return await ctx.send("❌ Trop pauvre.")
-    
     if random.choice([True, False]):
         stolen = random.randint(int(v_bal * 0.05), int(v_bal * 0.20))
-        db[str(ctx.author.id)] += stolen; db[str(member.id)] -= stolen; save_db(db)
+        db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + stolen
+        db[str(member.id)] -= stolen; save_db(db)
         await ctx.send(f"🥷 Vol réussi : **{stolen} coins** !")
     else:
         db[str(ctx.author.id)] = max(0, db.get(str(ctx.author.id), 0) - 100); save_db(db)
         await ctx.send("👮 Raté ! Amende de **100 coins**.")
 
 @bot.command(name="give")
-async def give(ctx, member: discord.Member, amount: int):
+async def give_money(ctx, member: discord.Member, amount: int):
     if amount <= 0: return
     db = load_db(); uid = str(ctx.author.id)
     if db.get(uid, 0) < amount: return await ctx.send("❌ Fonds insuffisants.")
@@ -271,12 +263,10 @@ async def buy(ctx, *, item: str):
     if not role: return await ctx.send("⚠️ Rôle Discord introuvable.")
     if role in ctx.author.roles: return await ctx.send("❌ Déjà possédé.")
     if db.get(uid, 0) < price: return await ctx.send("❌ Pas assez d'argent.")
-    
     try:
-        db[uid] -= price; save_db(db)
-        await ctx.author.add_roles(role)
+        db[uid] -= price; save_db(db); await ctx.author.add_roles(role)
         await ctx.send(f"🎉 Tu as acheté **{role.name}** !")
-    except: await ctx.send("❌ Permission refusée.")
+    except: await ctx.send("❌ Erreur permissions.")
 
 @bot.command()
 async def help(ctx):
