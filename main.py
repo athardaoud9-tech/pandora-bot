@@ -200,7 +200,55 @@ async def bet(ctx, amount_str: str, horse: int):
     await ctx.send("✅ Pari enregistré.")
 
 # --- AUTRES JEUX (BLACKJACK, DICE, MORPION) ---
-# [Garder le code des versions précédentes pour ces fonctions, ils sont stables]
+# --- MORPION ---
+class TicTacToeView(discord.ui.View):
+    def __init__(self, p1, p2, amt, db):
+        super().__init__(); self.p1, self.p2, self.amt, self.db = p1, p2, amt, db
+        self.turn = p1; self.board = [0]*9
+        for i in range(9): self.add_item(TicTacToeButton(i))
+    def check(self):
+        w = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+        return any(self.board[a]==self.board[b]==self.board[c]!=0 for a,b,c in w)
+
+class TicTacToeButton(discord.ui.Button):
+    def __init__(self, i): super().__init__(style=discord.ButtonStyle.secondary, label="⬜", row=i//3); self.idx = i
+    async def callback(self, i):
+        v = self.view
+        if i.user != v.turn: return await i.response.send_message("Pas ton tour !", ephemeral=True)
+        if self.label != "⬜": return
+        self.style = discord.ButtonStyle.danger if v.turn == v.p1 else discord.ButtonStyle.success
+        self.label = "❌" if v.turn == v.p1 else "⭕"; self.disabled = True
+        v.board[self.idx] = 1 if v.turn == v.p1 else 2
+        
+        if v.check():
+            if v.amt > 0: v.db[str(v.turn.id)] += v.amt * 2; save_db(v.db)
+            for c in v.children: c.disabled = True
+            await i.response.edit_message(content=f"🏆 **{v.turn.display_name} gagne !**", view=v); v.stop()
+        elif 0 not in v.board:
+            if v.amt > 0: v.db[str(v.p1.id)] += v.amt; v.db[str(v.p2.id)] += v.amt; save_db(v.db)
+            await i.response.edit_message(content="🤝 Match nul.", view=v); v.stop()
+        else:
+            v.turn = v.p2 if v.turn == v.p1 else v.p1
+            await i.response.edit_message(content=f"Tour de {v.turn.mention}", view=v)
+
+class DuelReq(discord.ui.View):
+    def __init__(self, p1, p2, amt): super().__init__(timeout=60); self.p1,self.p2,self.amt = p1,p2,amt
+    @discord.ui.button(label="Accepter", style=discord.ButtonStyle.success)
+    async def ok(self, i, b):
+        if i.user != self.p2: return
+        db = load_db()
+        if db.get(str(self.p2.id),0) < self.amt or db.get(str(self.p1.id),0) < self.amt: return await i.response.send_message("Erreur fonds.", ephemeral=True)
+        if self.amt > 0: db[str(self.p1.id)] -= self.amt; db[str(self.p2.id)] -= self.amt; save_db(db)
+        await i.response.edit_message(content=f"✅ Duel lancé ! Mise : {self.amt}", view=None)
+        await i.channel.send(view=TicTacToeView(self.p1, self.p2, self.amt, db))
+
+@bot.command()
+async def morpion(ctx, member: discord.Member, amount_str: str="0"):
+    if member.bot or member==ctx.author: return
+    db = load_db(); amt = parse_amount(amount_str, db.get(str(ctx.author.id), 0))
+    if amt > 0 and db.get(str(ctx.author.id), 0) < amt: return await ctx.send("❌ Pas assez d'argent.")
+    await ctx.send(f"⚔️ {member.mention}, défi Morpion pour **{amt}** ?", view=DuelReq(ctx.author, member, amt))
+    # [Garder le code des versions précédentes pour ces fonctions, ils sont stables]
 
 @bot.event
 async def on_command_error(ctx, error):
