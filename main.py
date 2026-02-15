@@ -660,6 +660,25 @@ async def on_command_error(ctx, error):
     else:
         print(f"Erreur: {error}")
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def admingive(ctx, member: discord.Member, amount: int):
+    db = load_db()
+    uid = str(member.id)
+    
+    # Ajout de l'argent
+    db[uid] = db.get(uid, 0) + amount
+    save_db(db)
+    
+    embed = discord.Embed(
+        title="🏦 TRANSFERT ADMINISTRATIF",
+        description=f"**{amount:,} coins** ont été ajoutés au compte de {member.mention}.",
+        color=COL_GOLD
+    )
+    embed.set_footer(text=f"Action effectuée par {ctx.author.display_name}")
+    
+    await ctx.send(embed=embed)
+
 # LANCEMENT
 keep_alive()
 try:
