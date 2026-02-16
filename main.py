@@ -13,7 +13,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora Casino est en ligne (v4.0) !"
+    return "Pandora Casino est en ligne (vFinal) !"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -41,7 +41,7 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 WELCOME_CHANNEL_ID = 1470176904668516528 
 LEAVE_CHANNEL_ID = 1470177322161147914
 
-# 🛒 BOUTIQUE (Prix mis à jour)
+# 🛒 BOUTIQUE
 SHOP_ITEMS = {
     "juif": 10000,       # Peut voler (rob)
     "riche": 100000,
@@ -71,7 +71,7 @@ def parse_amount(amount_str, balance):
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ Connecté : {bot.user}")
-    await bot.change_presence(activity=discord.Game(name="!helpme | Casino 70% Win"))
+    await bot.change_presence(activity=discord.Game(name="!helpme | Casino Pro"))
 
 @bot.event
 async def on_member_join(member):
@@ -104,14 +104,48 @@ async def on_member_remove(member):
         except: await channel.send(embed=embed)
     else: await channel.send(embed=embed)
 
-# --- 5. COMMANDE HELPME ---
+# --- 5. COMMANDE HELPME COMPLET ---
 @bot.command()
 async def helpme(ctx):
-    embed = discord.Embed(title="📜 MENU PRINCIPAL", color=COL_GOLD)
-    embed.add_field(name="💰 Économie", value="`!bal`, `!work` (10m), `!daily` (1k-3k), `!give` (Taxe 5%), `!rob` (Rôle Juif requis)", inline=False)
-    embed.add_field(name="🎰 Jeux (Chance Boostée)", value="`!slot` (7 wins = Hakari)\n`!dice`, `!roulette`, `!blackjack`", inline=False)
-    embed.add_field(name="🏆 Compétition", value="`!race` (10 wins = Hockey Genius)\n`!bet`, `!morpion` (Duel)", inline=False)
-    embed.add_field(name="🛒 Boutique", value="`!shop`, `!buy <item>`", inline=False)
+    embed = discord.Embed(title="📜 MENU PRINCIPAL - PANDORA CASINO", description="Voici toutes les commandes disponibles pour devenir riche !", color=COL_GOLD)
+    
+    embed.add_field(name="💰 __Économie de base__", value=(
+        "**`!bal`** : Voir ton solde actuel.\n"
+        "**`!work`** : Travailler (Gain: 200-800 | Cooldown: 10m).\n"
+        "**`!daily`** : Cadeau journalier (Gain: 1k-3k | Cooldown: 24h).\n"
+        "**`!give @user <montant>`** : Donner de l'argent (Taxe 5%).\n"
+        "**`!top`** : Voir le classement des plus riches."
+    ), inline=False)
+
+    embed.add_field(name="😈 __Crime & Vol__", value=(
+        "**`!rob @user`** : Voler un membre.\n"
+        "> ⚠️ **Requis :** Avoir le rôle 'Juif'.\n"
+        "> ⏳ **Cooldown :** 20 minutes.\n"
+        "> 🎲 **Risque :** 50% de chance de réussite."
+    ), inline=False)
+
+    embed.add_field(name="🎰 __Jeux de Casino (Boostés)__", value=(
+        "**`!slot <mise>`** : Machine à sous.\n"
+        "> 🔥 **Bonus :** Gagne 7 fois de suite pour obtenir le rôle **Hakari**.\n"
+        "**`!dice <mise>`** : Duel de dés contre le bot.\n"
+        "**`!roulette <mise> <couleur>`** : Rouge/Noir/Vert (x2 ou x14).\n"
+        "**`!blackjack <mise>`** : Le jeu du 21."
+    ), inline=False)
+
+    embed.add_field(name="🏇 __Multijoueur & Paris__", value=(
+        "**`!race`** : Lancer une course de chevaux (30s pour parier).\n"
+        "**`!bet <mise> <cheval>`** : Parier sur un cheval (1-5).\n"
+        "> 🏅 **Bonus :** 10 victoires cumulées = rôle **Hockey Genius**.\n"
+        "**`!morpion @user <mise>`** : Défier quelqu'un au Tic-Tac-Toe."
+    ), inline=False)
+
+    embed.add_field(name="🛒 __Boutique & Admin__", value=(
+        "**`!shop`** : Voir les prix des rôles.\n"
+        "**`!buy <item>`** : Acheter un rôle (ex: `!buy juif`).\n"
+        "**`!admingive`** : (Admin) Créer de l'argent."
+    ), inline=False)
+
+    embed.set_footer(text="Pandora Casino - Taux de victoire boosté à 70% !")
     await ctx.send(embed=embed)
 
 # --- 6. ÉCONOMIE ---
@@ -189,13 +223,16 @@ async def admingive(ctx, member: discord.Member, amount: int):
     save_db(db)
     await ctx.send(f"✅ **{amount}** donnés administrativement à {member.mention}.")
 
+# --- MODIFICATION ICI : ROB ---
 @bot.command()
-@commands.cooldown(1, 3600, commands.BucketType.user)
+@commands.cooldown(1, 1200, commands.BucketType.user) # 20 MINUTES (1200 secondes)
 async def rob(ctx, member: discord.Member):
-    # VERIFICATION ROLE "Juif"
-    role_requis = discord.utils.get(ctx.guild.roles, name="Juif") # ATTENTION MAJUSCULE
-    if role_requis not in ctx.author.roles:
-        return await ctx.send(embed=discord.Embed(description="⛔ Tu dois avoir le rôle **Juif** pour voler !", color=COL_RED))
+    # VERIFICATION ROLE "Juif" (Insensible à la casse)
+    user_roles = [r.name.lower() for r in ctx.author.roles]
+    if "juif" not in user_roles:
+        # Reset le cooldown si le joueur n'a pas le rôle pour pas qu'il attende pour rien
+        ctx.command.reset_cooldown(ctx)
+        return await ctx.send(embed=discord.Embed(description="⛔ Tu dois acheter le rôle **Juif** au `!shop` pour voler !", color=COL_RED))
 
     if member.bot or member == ctx.author: return
     db = load_db()
