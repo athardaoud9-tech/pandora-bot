@@ -7,24 +7,31 @@ import json
 import asyncio
 from flask import Flask
 from threading import Thread
+import logging
 
-# --- 1. KEEP ALIVE (POUR RENDER) ---
+# --- 1. KEEP ALIVE (CORRIGÉ POUR ÉVITER LE DOUBLE BOT) ---
+# On désactive les logs Flask pour garder la console propre
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora Casino est en ligne (vFinal - Slot Update) !"
+    return "Pandora Casino est en ligne (vFinal - Stable) !"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    # use_reloader=False est CRUCIAL : cela empêche Flask de lancer deux fois le bot
+    app.run(host='0.0.0.0', port=8080, use_reloader=False)
 
 def keep_alive():
     t = Thread(target=run)
+    t.daemon = True # Le thread se fermera si le bot crash
     t.start()
 
 # --- 2. CONFIGURATION ---
 DB_FILE = "database.json"
-TAX_RATE = 0.05 # 5% de taxe
+TAX_RATE = 0.05 
 
 # Couleurs
 COL_GOLD = 0xFFD700
@@ -43,7 +50,7 @@ LEAVE_CHANNEL_ID = 1470177322161147914
 
 # 🛒 BOUTIQUE
 SHOP_ITEMS = {
-    "juif": 10000,       # Peut voler (rob)
+    "juif": 10000,       
     "riche": 100000,
     "roi": 1000000
 }
@@ -70,7 +77,7 @@ def parse_amount(amount_str, balance):
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    print(f"✅ Connecté : {bot.user}")
+    print(f"✅ Connecté : {bot.user} (Instance Unique)")
     await bot.change_presence(activity=discord.Game(name="!helpme | Casino Pro"))
 
 @bot.event
@@ -407,7 +414,7 @@ class MorpionButton(discord.ui.Button):
             w_user = view.p1 if winner == 1 else view.p2
             if view.mise > 0:
                 db = load_db()
-                db[str(w_user.id)] += view.mise * 2
+                db[str(w_user.id)] = db.get(str(w_user.id), 0) + view.mise * 2
                 save_db(db)
             for c in view.children: c.disabled = True
             await interaction.response.edit_message(content=f"🏆 **{w_user.display_name}** gagne {view.mise*2} coins !", view=view)
@@ -415,8 +422,8 @@ class MorpionButton(discord.ui.Button):
             view.stop()
             if view.mise > 0:
                 db = load_db()
-                db[str(view.p1.id)] += view.mise
-                db[str(view.p2.id)] += view.mise
+                db[str(view.p1.id)] = db.get(str(view.p1.id), 0) + view.mise
+                db[str(view.p2.id)] = db.get(str(view.p2.id), 0) + view.mise
                 save_db(db)
             await interaction.response.edit_message(content="🤝 Match nul (Remboursé).", view=view)
         else:
@@ -457,9 +464,13 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
     async def cb(interaction):
         if interaction.user != opponent: return
         if mise > 0:
-            db[str(ctx.author.id)] -= mise
-            db[str(opponent.id)] -= mise
-            save_db(db)
+            # Relecture DB pour sécurité
+            curr_db = load_db()
+            if curr_db.get(str(ctx.author.id),0) < mise or curr_db.get(str(opponent.id),0) < mise:
+                return await interaction.response.send_message("❌ Fonds insuffisants.", ephemeral=True)
+            curr_db[str(ctx.author.id)] -= mise
+            curr_db[str(opponent.id)] -= mise
+            save_db(curr_db)
         await interaction.response.edit_message(content=f"⚔️ **Morpion** : {ctx.author.mention} vs {opponent.mention} ({mise} coins)", view=MorpionView(ctx.author, opponent, mise))
     btn.callback = cb
     view.add_item(btn)
@@ -467,9 +478,9 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
 
 # --- 9. BLACKJACK ---
 class BlackjackView(discord.ui.View):
-    def __init__(self, author_id, amount, db):
+    def __init__(self, author_id, amount):
         super().__init__(timeout=60)
-        self.author_id, self.amount, self.db = author_id, amount, db
+        self.author_id, self.amount = author_id, amount
         self.deck = [2,3,4,5,6,7,8,9,10,10,10,10,11]*4
         self.player = [self.draw(), self.draw()]
         self.dealer = [self.draw(), self.draw()]
@@ -505,17 +516,21 @@ class BlackjackView(discord.ui.View):
         if i.user.id != self.author_id: return
         while self.calc(self.dealer) < 17: self.dealer.append(self.draw())
         p, d = self.calc(self.player), self.calc(self.dealer)
+        
+        # On recharge la DB au moment du résultat pour éviter les écrasements
+        db = load_db()
         uid = str(self.author_id)
+        
         if d > 21 or p > d:
-            self.db[uid] += self.amount * 2
-            save_db(self.db)
+            db[uid] = db.get(uid, 0) + self.amount * 2
+            save_db(db)
             await self.update(i, True, "🎉 Gagné !")
         elif p == d:
-            self.db[uid] += self.amount
-            save_db(self.db)
+            db[uid] = db.get(uid, 0) + self.amount
+            save_db(db)
             await self.update(i, True, "🤝 Égalité.")
         else:
-            save_db(self.db)
+            # Perdu (argent déjà retiré au lancement)
             await self.update(i, True, "❌ Perdu.")
 
 @bot.command()
@@ -525,7 +540,7 @@ async def blackjack(ctx, amount_str: str):
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     db[uid] -= amount
     save_db(db)
-    await ctx.send(embed=discord.Embed(title="🃏 Blackjack", color=COL_BLUE), view=BlackjackView(ctx.author.id, amount, db))
+    await ctx.send(embed=discord.Embed(title="🃏 Blackjack", color=COL_BLUE), view=BlackjackView(ctx.author.id, amount))
 
 # --- 10. COURSE (RACE) ---
 race_open = False
