@@ -13,7 +13,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora Casino est en ligne (vFinal) !"
+    return "Pandora Casino est en ligne (vFinal - Slot Update) !"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -124,9 +124,9 @@ async def helpme(ctx):
         "> 🎲 **Risque :** 50% de chance de réussite."
     ), inline=False)
 
-    embed.add_field(name="🎰 __Jeux de Casino (Boostés)__", value=(
-        "**`!slot <mise>`** : Machine à sous.\n"
-        "> 🔥 **Bonus :** Gagne 7 fois de suite pour obtenir le rôle **Hakari**.\n"
+    embed.add_field(name="🎰 __Jeux de Casino__", value=(
+        "**`!slot <mise>`** : Machine à sous (Boost Hakari).\n"
+        "> 🔥 **Bonus :** Gagne 7 fois de suite pour obtenir le rôle **Hakari** (80% Win Rate).\n"
         "**`!dice <mise>`** : Duel de dés contre le bot.\n"
         "**`!roulette <mise> <couleur>`** : Rouge/Noir/Vert (x2 ou x14).\n"
         "**`!blackjack <mise>`** : Le jeu du 21."
@@ -145,7 +145,7 @@ async def helpme(ctx):
         "**`!admingive`** : (Admin) Créer de l'argent."
     ), inline=False)
 
-    embed.set_footer(text="Pandora Casino - Taux de victoire boosté à 70% !")
+    embed.set_footer(text="Pandora Casino - Chance boostée avec les rôles !")
     await ctx.send(embed=embed)
 
 # --- 6. ÉCONOMIE ---
@@ -223,14 +223,12 @@ async def admingive(ctx, member: discord.Member, amount: int):
     save_db(db)
     await ctx.send(f"✅ **{amount}** donnés administrativement à {member.mention}.")
 
-# --- MODIFICATION ICI : ROB ---
 @bot.command()
-@commands.cooldown(1, 1200, commands.BucketType.user) # 20 MINUTES (1200 secondes)
+@commands.cooldown(1, 1200, commands.BucketType.user) # 20 MINUTES
 async def rob(ctx, member: discord.Member):
     # VERIFICATION ROLE "Juif" (Insensible à la casse)
     user_roles = [r.name.lower() for r in ctx.author.roles]
     if "juif" not in user_roles:
-        # Reset le cooldown si le joueur n'a pas le rôle pour pas qu'il attende pour rien
         ctx.command.reset_cooldown(ctx)
         return await ctx.send(embed=discord.Embed(description="⛔ Tu dois acheter le rôle **Juif** au `!shop` pour voler !", color=COL_RED))
 
@@ -253,7 +251,7 @@ async def rob(ctx, member: discord.Member):
         save_db(db)
         await ctx.send(embed=discord.Embed(description=f"👮 Tu t'es fait attraper ! Amende de **{fine} coins**.", color=COL_RED))
 
-# --- 7. JEUX (DICE, SLOT, ROULETTE - 70% WIN) ---
+# --- 7. JEUX (SLOT MODIFIÉ ICI) ---
 
 @bot.command()
 async def dice(ctx, amount_str: str):
@@ -295,8 +293,16 @@ async def slot(ctx, amount_str: str):
 
     symbols = ["🍒", "7️⃣", "💎", "🍇", "🔔"]
     
-    # TRUCAGE 70%
-    if random.random() < 0.70:
+    # --- LOGIQUE DE CHANCE MODIFIÉE ---
+    # Vérifie si le joueur a le rôle Hakari (insensible à la casse)
+    user_roles = [r.name.lower() for r in ctx.author.roles]
+    if "hakari" in user_roles:
+        win_rate = 0.80 # 80% si Hakari
+    else:
+        win_rate = 0.55 # 55% par défaut
+
+    # TRUCAGE DYNAMIQUE
+    if random.random() < win_rate:
         s = random.choice(symbols)
         res = [s, s, s] # Force 3 pareils
         mult = 100 if s == "7️⃣" else 20
