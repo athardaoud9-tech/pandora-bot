@@ -20,7 +20,7 @@ def home():
     return "Pandora Casino est en ligne (vFinal - Animé & Équilibré) !"
 
 def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 
 # --- 2. CONFIGURATION BOT ET BDD ---
@@ -102,7 +102,7 @@ async def on_member_remove(member):
         except: await channel.send(embed=embed)
     else: await channel.send(embed=embed)
 
-# --- 5. HELPME (VERSION AMÉLIORÉE) ---
+# --- 5. HELPME ---
 @bot.command()
 async def helpme(ctx):
     embed = discord.Embed(
@@ -110,41 +110,13 @@ async def helpme(ctx):
         description="Voici la liste complète des commandes disponibles pour t'enrichir (ou tout perdre) !", 
         color=COL_GOLD
     )
-    
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else "")
-
-    embed.add_field(
-        name="💰 ÉCONOMIE", 
-        value="`!bal` : Voir ton solde\n`!work` : Travailler (toutes les 10m)\n`!daily` : Cadeau quotidien\n`!leaderboard` : Top 10 des riches\n`!give @user <montant>` : Donner de l'argent", 
-        inline=False
-    )
-
-    embed.add_field(
-        name="🎰 JEUX DE HASARD", 
-        value="`!slot <mise>` : Machine à sous (Jackpot x1000 !)\n`!dice <mise>` : Duel de dés contre le bot\n`!roulette <mise> <choix>` : (Choix: rouge, noir, vert ou un chiffre)", 
-        inline=False
-    )
-
-    embed.add_field(
-        name="🃏 STRATÉGIE & DEFIS", 
-        value="`!blackjack <mise>` : Atteins 21 sans sauter\n`!morpion @user <mise>` : Duel tactique contre un ami", 
-        inline=False
-    )
-
-    embed.add_field(
-        name="🏇 PARIS HIPPIQUES", 
-        value="`!race` : Lance une course de chevaux\n`!bet <mise> <n°>` : Parie sur ton favori", 
-        inline=False
-    )
-
-    embed.add_field(
-        name="🛒 BOUTIQUE & CRIME", 
-        value="`!shop` : Voir les rôles à acheter\n`!buy <nom>` : Acheter un rôle\n`!rob @user` : Voler quelqu'un (Nécessite le rôle **Juif**)", 
-        inline=False
-    )
-
+    embed.add_field(name="💰 ÉCONOMIE", value="`!bal` : Voir ton solde\n`!work` : Travailler (toutes les 10m)\n`!daily` : Cadeau quotidien\n`!leaderboard` : Top 10 des riches\n`!give @user <montant>` : Donner de l'argent", inline=False)
+    embed.add_field(name="🎰 JEUX DE HASARD", value="`!slot <mise>` : Machine à sous\n`!dice <mise>` : Duel de dés\n`!roulette <mise> <choix>` : Roulette", inline=False)
+    embed.add_field(name="🃏 STRATÉGIE & DEFIS", value="`!blackjack <mise>` : Atteins 21 sans sauter\n`!morpion @user <mise>` : Duel tactique", inline=False)
+    embed.add_field(name="🏇 PARIS HIPPIQUES", value="`!race` : Lance une course\n`!bet <mise> <n°>` : Parie sur ton favori", inline=False)
+    embed.add_field(name="🛒 BOUTIQUE & CRIME", value="`!shop` : Rôles à acheter\n`!buy <nom>` : Acheter un rôle\n`!rob @user` : Voler (Rôle Juif requis)", inline=False)
     embed.set_footer(text="Pandora Casino • Utilise le préfixe '!' avant chaque commande", icon_url=ctx.guild.icon.url if ctx.guild.icon else "")
-    
     await ctx.send(embed=embed)
 
 # --- 6. ÉCONOMIE ---
@@ -170,7 +142,7 @@ async def bal(ctx, member: discord.Member = None):
 @commands.cooldown(1, 600, commands.BucketType.user) # 10 minutes
 async def work(ctx):
     db = load_db()
-    gain = random.randint(300, 1000) # Équilibré
+    gain = random.randint(300, 1000)
     db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + gain
     save_db(db)
     await ctx.send(embed=discord.Embed(description=f"🔨 Tu as travaillé et gagné **{gain} coins**.", color=COL_GREEN))
@@ -183,7 +155,7 @@ async def daily(ctx):
     if time.time() - db.get(key, 0) < 86400:
         return await ctx.send(embed=discord.Embed(description="⏳ Reviens demain !", color=COL_RED))
     
-    gain = random.randint(2000, 5000) # Boosté pour aider à grind
+    gain = random.randint(2000, 5000)
     db[uid] = db.get(uid, 0) + gain
     db[key] = time.time()
     save_db(db)
@@ -207,6 +179,25 @@ async def give(ctx, member: discord.Member, amount_str: str):
     await ctx.send(embed=discord.Embed(description=f"💸 **Envoi :** {amount}\n🏛️ **Taxe (5%) :** -{tax}\n✅ **Reçu :** {final}", color=COL_GREEN))
 
 @bot.command()
+@commands.has_permissions(administrator=True)
+async def admingive(ctx, member: discord.Member, amount: int):
+    db = load_db()
+    db[str(member.id)] = db.get(str(member.id), 0) + amount
+    save_db(db)
+    await ctx.send(f"✅ **{amount:,} coins** donnés à {member.mention}.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def impots(ctx, member: discord.Member, amount: int):
+    db = load_db()
+    uid = str(member.id)
+    current = db.get(uid, 0)
+    new_bal = max(0, current - amount)
+    db[uid] = new_bal
+    save_db(db)
+    await ctx.send(f"🏛️ **L'État d'Israel a prélevé des impôts !**\n📉 **{amount:,} coins** ont été retirés à {member.mention}. (Nouveau solde: {new_bal:,})")
+
+@bot.command()
 @commands.cooldown(1, 1200, commands.BucketType.user)
 async def rob(ctx, member: discord.Member):
     user_roles = [r.name.lower() for r in ctx.author.roles]
@@ -220,14 +211,14 @@ async def rob(ctx, member: discord.Member):
     
     if vic_bal < 1000: return await ctx.send("❌ Il est trop pauvre (moins de 1000).")
     
-    if random.random() < 0.45: # 45% de chance de réussir
+    if random.random() < 0.45:
         stolen = int(vic_bal * random.uniform(0.05, 0.15))
         db[str(ctx.author.id)] += stolen
         db[str(member.id)] -= stolen
         save_db(db)
         await ctx.send(embed=discord.Embed(description=f"🥷 Tu as volé **{stolen} coins** !", color=COL_GREEN))
     else:
-        fine = 1000 # Amende plus sévère
+        fine = 1000
         db[str(ctx.author.id)] = max(0, db.get(str(ctx.author.id), 0) - fine)
         save_db(db)
         await ctx.send(embed=discord.Embed(description=f"👮 Attrapé ! Amende de **{fine} coins**.", color=COL_RED))
@@ -242,13 +233,11 @@ async def dice(ctx, amount_str: str):
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
-    # Animation
     anim_embed = discord.Embed(title="🎲 Lancer de dés...", color=COL_GOLD)
     anim_embed.set_image(url="https://media.tenor.com/DOX2z6kZl84AAAAi/dice-roll.gif")
     msg = await ctx.send(embed=anim_embed)
     await asyncio.sleep(2.5)
 
-    # Vraies probabilités équitables (1 à 6, victoire si supérieur)
     p_score = random.randint(1, 6)
     b_score = random.randint(1, 6)
     win = p_score > b_score
@@ -258,7 +247,7 @@ async def dice(ctx, amount_str: str):
     embed.add_field(name="Croupier", value=f"**{b_score}**")
 
     if win:
-        db[uid] += amount # Gagne x2 (sa mise + profit)
+        db[uid] += amount
         embed.description = f"🎉 **GAGNÉ !** Tu remportes **{amount*2} coins**"
     else:
         db[uid] -= amount
@@ -276,19 +265,17 @@ async def slot(ctx, amount_str: str):
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
-    # Animation
     anim_embed = discord.Embed(title="🎰 Machine à sous...", description="Les rouleaux tournent...", color=COL_GOLD)
-    anim_embed.set_image(url="https://media.tenor.com/BgR83Df82t0AAAAi/bocchi-the-rock-bocchi-slot.gif")
+    anim_embed.set_image(url="https://media.tenor.com/0vKz5tJ3gBQAAAAi/slot-machine-slots.gif")
     msg = await ctx.send(embed=anim_embed)
     await asyncio.sleep(3)
 
     user_roles = [r.name.lower() for r in ctx.author.roles]
-    win_rate = 0.45 if "hakari" in user_roles else 0.30 # Stats réalistes de casino
+    win_rate = 0.45 if "hakari" in user_roles else 0.30
 
     symbols = ["🍒", "💎", "🍇", "🔔", "🍊"]
     
     if random.random() < win_rate:
-        # Le joueur gagne. Détermination du gain.
         luck = random.random()
         if luck < 0.001:
             res = ["7️⃣", "7️⃣", "7️⃣"]
@@ -303,7 +290,6 @@ async def slot(ctx, amount_str: str):
             random.shuffle(res)
             mult = 2
     else:
-        # Perte forcée
         res = random.sample(symbols, 3)
         mult = 0
 
@@ -316,16 +302,16 @@ async def slot(ctx, amount_str: str):
         embed.color = COL_GREEN
         embed.add_field(name="RÉSULTAT", value=f"🎉 **JACKPOT !** Tu gagnes **{profit:,} coins** (x{mult})")
         
-        # HAKARI
+        # HAKARI (5 fois d'affilée minimum)
         db[streak_key] = db.get(streak_key, 0) + 1
-        if db[streak_key] >= 5: # Réduit à 5 pour que ce soit faisable
+        if db[streak_key] >= 5:
             role = discord.utils.get(ctx.guild.roles, name="Hakari")
             if role and role not in ctx.author.roles:
                 await ctx.author.add_roles(role)
                 embed.add_field(name="🔥 HAKARI", value="Rôle débloqué !", inline=False)
     else:
         db[uid] -= amount
-        db[streak_key] = 0
+        db[streak_key] = 0 # Retour à 0 si on perd (pour forcer 5x d'affilée)
         embed.color = COL_RED
         embed.add_field(name="RÉSULTAT", value=f"❌ **PERDU.** (-{amount:,} coins)")
 
@@ -344,13 +330,11 @@ async def roulette(ctx, amount_str: str, choice: str):
     if choice not in ["rouge", "noir", "vert", "red", "black", "green"] and not choice.isdigit():
         return await ctx.send("❌ Choix invalide (rouge, noir, vert, ou 0-36).")
 
-    # Animation
     anim_embed = discord.Embed(title="🎡 Roulette...", description="La bille tourne...", color=COL_GOLD)
     anim_embed.set_image(url="https://media.tenor.com/7bEw9q_h7CMAAAAi/roulette-casino.gif")
     msg = await ctx.send(embed=anim_embed)
     await asyncio.sleep(4)
 
-    # Simulation pure mathématique (Règles européennes 0-36)
     num = random.randint(0, 36)
     if num == 0: color = "vert"
     elif num in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]: color = "rouge"
@@ -463,7 +447,7 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
     view.add_item(btn)
     await ctx.send(f"{opponent.mention}, duel de Morpion pour {mise} coins ?", view=view)
 
-# --- 9. BLACKJACK (Intact) ---
+# --- 9. BLACKJACK (Corrigé) ---
 class BlackjackView(discord.ui.View):
     def __init__(self, author_id, amount):
         super().__init__(timeout=60)
@@ -528,7 +512,14 @@ async def blackjack(ctx, amount_str: str):
     
     db[uid] -= amount
     save_db(db)
-    await ctx.send(embed=discord.Embed(title="🃏 Blackjack", color=COL_BLUE), view=BlackjackView(ctx.author.id, amount))
+    
+    # FIX : On affiche la main dès le lancement de la commande
+    view = BlackjackView(ctx.author.id, amount)
+    e = discord.Embed(title="🃏 Blackjack", color=COL_BLUE)
+    e.add_field(name=f"Toi ({view.calc(view.player)})", value=str(view.player))
+    e.add_field(name="Croupier", value=f"[{view.dealer[0]}, ?]")
+    
+    await ctx.send(embed=e, view=view)
 
 # --- 10. COURSE (RACE) ---
 race_open = False
@@ -548,7 +539,7 @@ async def race(ctx):
     
     msg = await ctx.send("🏁 **C'EST PARTI !**")
     track = ["🐎", "🦄", "🦓", "🐖", "🐆"]
-    for _ in range(4): # Animation un peu plus longue
+    for _ in range(4):
         await asyncio.sleep(1.5)
         random.shuffle(track)
         await msg.edit(content="\n".join([f"{i+1}. {t} {'💨' * random.randint(1,3)}" for i, t in enumerate(track)]))
@@ -559,7 +550,7 @@ async def race(ctx):
     
     for b in race_bets:
         if b['horse'] == winner:
-            gain = b['amount'] * 4 # Gain boosté à x4 pour équilibrer la chance de 1/5
+            gain = b['amount'] * 4
             db[str(b['uid'])] = db.get(str(b['uid']), 0) + gain
             res += f"✅ <@{b['uid']}> gagne {gain:,} coins !\n"
             
@@ -617,7 +608,7 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
         await ctx.send(f"⏳ Attends encore {int(error.retry_after)} secondes.")
     elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ Tu n'as pas la permission.")
+        await ctx.send("❌ Tu n'as pas la permission d'utiliser cette commande.")
     else: print(error)
 
 
