@@ -17,37 +17,33 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora Casino est en ligne (vFinal - Patched) !"
+    return "Pandora Casino est en ligne (vFinal - Animé & Équilibré) !"
 
 def run_web_server():
-    # Render impose d'écouter sur 0.0.0.0 et sur le port de sa variable d'env
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 
 # --- 2. CONFIGURATION BOT ET BDD ---
 DB_FILE = "database.json"
 TAX_RATE = 0.05 
 
-# Couleurs
 COL_GOLD = 0xFFD700
 COL_RED = 0xE74C3C
 COL_GREEN = 0x2ECC71
 COL_BLUE = 0x3498DB
 COL_DARK = 0x2C3E50
 
-# Configuration Bot
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# ⚠️ TES ID DE SALONS
 WELCOME_CHANNEL_ID = 1470176904668516528 
 LEAVE_CHANNEL_ID = 1470177322161147914
 
-# 🛒 BOUTIQUE (PRIX x10)
+# 🛒 BOUTIQUE (PRIX ÉQUILIBRÉS)
 SHOP_ITEMS = {
-    "juif": 100000,       # 100k
-    "riche": 1000000,     # 1M
-    "roi": 10000000       # 10M
+    "juif": 100000,         # 100k (Accessible)
+    "riche": 5000000,       # 5M (Difficile)
+    "roi": 50000000         # 50M (Objectif ultime)
 }
 
 # --- 3. FONCTIONS UTILES ---
@@ -73,7 +69,7 @@ def parse_amount(amount_str, balance):
 async def on_ready():
     await bot.tree.sync()
     print(f"✅ Connecté : {bot.user}")
-    await bot.change_presence(activity=discord.Game(name="!helpme | Casino Sécurisé"))
+    await bot.change_presence(activity=discord.Game(name="!helpme | Casino V2"))
 
 @bot.event
 async def on_member_join(member):
@@ -106,14 +102,49 @@ async def on_member_remove(member):
         except: await channel.send(embed=embed)
     else: await channel.send(embed=embed)
 
-# --- 5. HELPME ---
+# --- 5. HELPME (VERSION AMÉLIORÉE) ---
 @bot.command()
 async def helpme(ctx):
-    embed = discord.Embed(title="📜 MENU PRINCIPAL", description="Commandes du Casino", color=COL_GOLD)
-    embed.add_field(name="💰 Économie", value="`!bal`, `!work`, `!daily`, `!give`, `!rob` (Role Juif)", inline=False)
-    embed.add_field(name="🎰 Jeux", value="`!slot`, `!dice`, `!roulette`, `!blackjack`", inline=False)
-    embed.add_field(name="🏇 Paris", value="`!race`, `!bet`, `!morpion`", inline=False)
-    embed.add_field(name="🛒 Boutique", value="`!shop`, `!buy`", inline=False)
+    embed = discord.Embed(
+        title="✨ PANDORA CASINO - AIDE ✨", 
+        description="Voici la liste complète des commandes disponibles pour t'enrichir (ou tout perdre) !", 
+        color=COL_GOLD
+    )
+    
+    embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else "")
+
+    embed.add_field(
+        name="💰 ÉCONOMIE", 
+        value="`!bal` : Voir ton solde\n`!work` : Travailler (toutes les 10m)\n`!daily` : Cadeau quotidien\n`!leaderboard` : Top 10 des riches\n`!give @user <montant>` : Donner de l'argent", 
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎰 JEUX DE HASARD", 
+        value="`!slot <mise>` : Machine à sous (Jackpot x1000 !)\n`!dice <mise>` : Duel de dés contre le bot\n`!roulette <mise> <choix>` : (Choix: rouge, noir, vert ou un chiffre)", 
+        inline=False
+    )
+
+    embed.add_field(
+        name="🃏 STRATÉGIE & DEFIS", 
+        value="`!blackjack <mise>` : Atteins 21 sans sauter\n`!morpion @user <mise>` : Duel tactique contre un ami", 
+        inline=False
+    )
+
+    embed.add_field(
+        name="🏇 PARIS HIPPIQUES", 
+        value="`!race` : Lance une course de chevaux\n`!bet <mise> <n°>` : Parie sur ton favori", 
+        inline=False
+    )
+
+    embed.add_field(
+        name="🛒 BOUTIQUE & CRIME", 
+        value="`!shop` : Voir les rôles à acheter\n`!buy <nom>` : Acheter un rôle\n`!rob @user` : Voler quelqu'un (Nécessite le rôle **Juif**)", 
+        inline=False
+    )
+
+    embed.set_footer(text="Pandora Casino • Utilise le préfixe '!' avant chaque commande", icon_url=ctx.guild.icon.url if ctx.guild.icon else "")
+    
     await ctx.send(embed=embed)
 
 # --- 6. ÉCONOMIE ---
@@ -136,10 +167,10 @@ async def bal(ctx, member: discord.Member = None):
     await ctx.send(embed=discord.Embed(description=f"💰 **{target.display_name}** a **{int(bal):,} coins**", color=COL_BLUE))
 
 @bot.command()
-@commands.cooldown(1, 600, commands.BucketType.user)
+@commands.cooldown(1, 600, commands.BucketType.user) # 10 minutes
 async def work(ctx):
     db = load_db()
-    gain = random.randint(200, 800)
+    gain = random.randint(300, 1000) # Équilibré
     db[str(ctx.author.id)] = db.get(str(ctx.author.id), 0) + gain
     save_db(db)
     await ctx.send(embed=discord.Embed(description=f"🔨 Tu as travaillé et gagné **{gain} coins**.", color=COL_GREEN))
@@ -152,7 +183,7 @@ async def daily(ctx):
     if time.time() - db.get(key, 0) < 86400:
         return await ctx.send(embed=discord.Embed(description="⏳ Reviens demain !", color=COL_RED))
     
-    gain = random.randint(1000, 3000)
+    gain = random.randint(2000, 5000) # Boosté pour aider à grind
     db[uid] = db.get(uid, 0) + gain
     db[key] = time.time()
     save_db(db)
@@ -165,8 +196,7 @@ async def give(ctx, member: discord.Member, amount_str: str):
     uid, tid = str(ctx.author.id), str(member.id)
     amount = parse_amount(amount_str, db.get(uid, 0))
     
-    if amount <= 0 or db.get(uid, 0) < amount:
-        return await ctx.send("❌ Pas assez d'argent.")
+    if amount <= 0 or db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent.")
     
     tax = int(amount * TAX_RATE)
     final = amount - tax
@@ -174,27 +204,7 @@ async def give(ctx, member: discord.Member, amount_str: str):
     db[uid] -= amount
     db[tid] = db.get(tid, 0) + final
     save_db(db)
-    
     await ctx.send(embed=discord.Embed(description=f"💸 **Envoi :** {amount}\n🏛️ **Taxe (5%) :** -{tax}\n✅ **Reçu :** {final}", color=COL_GREEN))
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def admingive(ctx, member: discord.Member, amount: int):
-    db = load_db()
-    db[str(member.id)] = db.get(str(member.id), 0) + amount
-    save_db(db)
-    await ctx.send(f"✅ **{amount}** donnés à {member.mention}.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def admintake(ctx, member: discord.Member, amount: int):
-    db = load_db()
-    uid = str(member.id)
-    current = db.get(uid, 0)
-    new_bal = max(0, current - amount)
-    db[uid] = new_bal
-    save_db(db)
-    await ctx.send(f"📉 **{amount}** retirés à {member.mention}. (Nouveau solde: {new_bal})")
 
 @bot.command()
 @commands.cooldown(1, 1200, commands.BucketType.user)
@@ -208,21 +218,21 @@ async def rob(ctx, member: discord.Member):
     db = load_db()
     vic_bal = db.get(str(member.id), 0)
     
-    if vic_bal < 500: return await ctx.send("❌ Il est trop pauvre.")
+    if vic_bal < 1000: return await ctx.send("❌ Il est trop pauvre (moins de 1000).")
     
-    if random.random() < 0.5:
-        stolen = int(vic_bal * random.uniform(0.05, 0.2))
+    if random.random() < 0.45: # 45% de chance de réussir
+        stolen = int(vic_bal * random.uniform(0.05, 0.15))
         db[str(ctx.author.id)] += stolen
         db[str(member.id)] -= stolen
         save_db(db)
         await ctx.send(embed=discord.Embed(description=f"🥷 Tu as volé **{stolen} coins** !", color=COL_GREEN))
     else:
-        fine = 500
+        fine = 1000 # Amende plus sévère
         db[str(ctx.author.id)] = max(0, db.get(str(ctx.author.id), 0) - fine)
         save_db(db)
         await ctx.send(embed=discord.Embed(description=f"👮 Attrapé ! Amende de **{fine} coins**.", color=COL_RED))
 
-# --- 7. JEUX (SECURISÉS) ---
+# --- 7. JEUX AVEC ANIMATIONS ET ODDS RÉALISTES ---
 
 @bot.command()
 async def dice(ctx, amount_str: str):
@@ -230,31 +240,33 @@ async def dice(ctx, amount_str: str):
     uid = str(ctx.author.id)
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
-    
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
-    if random.random() < 0.70:
-        p_score = random.randint(7, 12)
-        b_score = random.randint(2, p_score - 1)
-        win = True
-    else:
-        b_score = random.randint(7, 12)
-        p_score = random.randint(2, b_score - 1)
-        win = False
+    # Animation
+    anim_embed = discord.Embed(title="🎲 Lancer de dés...", color=COL_GOLD)
+    anim_embed.set_image(url="https://media.tenor.com/DOX2z6kZl84AAAAi/dice-roll.gif")
+    msg = await ctx.send(embed=anim_embed)
+    await asyncio.sleep(2.5)
 
-    embed = discord.Embed(title="🎲 Dés", color=COL_GREEN if win else COL_RED)
-    embed.add_field(name="Toi", value=str(p_score))
-    embed.add_field(name="Bot", value=str(b_score))
+    # Vraies probabilités équitables (1 à 6, victoire si supérieur)
+    p_score = random.randint(1, 6)
+    b_score = random.randint(1, 6)
+    win = p_score > b_score
+
+    embed = discord.Embed(title="🎲 Résultat des Dés", color=COL_GREEN if win else COL_RED)
+    embed.add_field(name="Toi", value=f"**{p_score}**")
+    embed.add_field(name="Croupier", value=f"**{b_score}**")
 
     if win:
-        db[uid] += amount
-        embed.description = f"🎉 Gagné ! +{amount}"
+        db[uid] += amount # Gagne x2 (sa mise + profit)
+        embed.description = f"🎉 **GAGNÉ !** Tu remportes **{amount*2} coins**"
     else:
         db[uid] -= amount
-        embed.description = f"❌ Perdu... -{amount}"
+        embed.description = f"❌ **PERDU.** Tu perds **{amount} coins**"
+        if p_score == b_score: embed.set_footer(text="Égalité : L'avantage est à la banque.")
     
     save_db(db)
-    await ctx.send(embed=embed)
+    await msg.edit(embed=embed)
 
 @bot.command()
 async def slot(ctx, amount_str: str):
@@ -262,53 +274,63 @@ async def slot(ctx, amount_str: str):
     uid = str(ctx.author.id)
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
-    
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
-    symbols_common = ["🍒", "💎", "🍇", "🔔"]
-    
-    user_roles = [r.name.lower() for r in ctx.author.roles]
-    win_rate = 0.80 if "hakari" in user_roles else 0.55
+    # Animation
+    anim_embed = discord.Embed(title="🎰 Machine à sous...", description="Les rouleaux tournent...", color=COL_GOLD)
+    anim_embed.set_image(url="https://media.tenor.com/BgR83Df82t0AAAAi/bocchi-the-rock-bocchi-slot.gif")
+    msg = await ctx.send(embed=anim_embed)
+    await asyncio.sleep(3)
 
-    # LOGIQUE REVISÉE : 0.1% de chance d'avoir le jackpot x1000
+    user_roles = [r.name.lower() for r in ctx.author.roles]
+    win_rate = 0.45 if "hakari" in user_roles else 0.30 # Stats réalistes de casino
+
+    symbols = ["🍒", "💎", "🍇", "🔔", "🍊"]
+    
     if random.random() < win_rate:
-        if random.random() < 0.001:
-            s = "7️⃣"
+        # Le joueur gagne. Détermination du gain.
+        luck = random.random()
+        if luck < 0.001:
+            res = ["7️⃣", "7️⃣", "7️⃣"]
             mult = 1000
+        elif luck < 0.05:
+            s = random.choice(symbols)
+            res = [s, s, s]
+            mult = 10
         else:
-            s = random.choice(symbols_common)
-            mult = 10 
-        res = [s, s, s]
+            s = random.choice(symbols)
+            res = [s, s, random.choice([x for x in symbols if x != s])]
+            random.shuffle(res)
+            mult = 2
     else:
-        res = random.sample(symbols_common + ["7️⃣"], 3)
-        while res[0] == res[1] == res[2]:
-            res = random.sample(symbols_common + ["7️⃣"], 3)
+        # Perte forcée
+        res = random.sample(symbols, 3)
         mult = 0
 
-    embed = discord.Embed(title="🎰 Slots", description=f"🔹 {' | '.join(res)} 🔹", color=COL_BLUE)
+    embed = discord.Embed(title="🎰 Machine à sous", description=f"🟩 **[ {' | '.join(res)} ]** 🟩", color=COL_BLUE)
     streak_key = f"{uid}_slot_streak"
 
     if mult > 0:
         profit = int(amount * mult)
         db[uid] += (profit - amount)
         embed.color = COL_GREEN
-        embed.add_field(name="GAGNÉ !", value=f"Tu gagnes **{profit} coins** !")
+        embed.add_field(name="RÉSULTAT", value=f"🎉 **JACKPOT !** Tu gagnes **{profit:,} coins** (x{mult})")
         
         # HAKARI
         db[streak_key] = db.get(streak_key, 0) + 1
-        if db[streak_key] >= 7:
+        if db[streak_key] >= 5: # Réduit à 5 pour que ce soit faisable
             role = discord.utils.get(ctx.guild.roles, name="Hakari")
             if role and role not in ctx.author.roles:
                 await ctx.author.add_roles(role)
-                embed.add_field(name="🔥 HAKARI", value="Rôle obtenu !", inline=False)
+                embed.add_field(name="🔥 HAKARI", value="Rôle débloqué !", inline=False)
     else:
         db[uid] -= amount
         db[streak_key] = 0
         embed.color = COL_RED
-        embed.set_footer(text="Perdu...")
+        embed.add_field(name="RÉSULTAT", value=f"❌ **PERDU.** (-{amount:,} coins)")
 
     save_db(db)
-    await ctx.send(embed=embed)
+    await msg.edit(embed=embed)
 
 @bot.command()
 async def roulette(ctx, amount_str: str, choice: str):
@@ -316,50 +338,51 @@ async def roulette(ctx, amount_str: str, choice: str):
     uid = str(ctx.author.id)
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
-    
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
     choice = choice.lower()
-    valid = ["rouge", "noir", "vert", "red", "black", "green"]
-    
-    force_win = random.random() < 0.70
-    num = random.randint(0, 36)
-    color = "vert" if num == 0 else ("rouge" if num % 2 == 1 else "noir")
+    if choice not in ["rouge", "noir", "vert", "red", "black", "green"] and not choice.isdigit():
+        return await ctx.send("❌ Choix invalide (rouge, noir, vert, ou 0-36).")
 
-    if force_win:
-        if choice in ["rouge", "red"]: color = "rouge"; num = 1
-        elif choice in ["noir", "black"]: color = "noir"; num = 2
-        elif choice in ["vert", "green"]: color = "vert"; num = 0
-        elif choice.isdigit(): num = int(choice); color = "vert" if num==0 else ("rouge" if num%2==1 else "noir")
+    # Animation
+    anim_embed = discord.Embed(title="🎡 Roulette...", description="La bille tourne...", color=COL_GOLD)
+    anim_embed.set_image(url="https://media.tenor.com/7bEw9q_h7CMAAAAi/roulette-casino.gif")
+    msg = await ctx.send(embed=anim_embed)
+    await asyncio.sleep(4)
+
+    # Simulation pure mathématique (Règles européennes 0-36)
+    num = random.randint(0, 36)
+    if num == 0: color = "vert"
+    elif num in [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]: color = "rouge"
+    else: color = "noir"
 
     win = False
     mult = 0
-    if choice in ["rouge", "red"] and color == "rouge": win=True; mult=2
-    elif choice in ["noir", "black"] and color == "noir": win=True; mult=2
-    elif choice in ["vert", "green"] and color == "vert": win=True; mult=14
-    elif choice.isdigit() and int(choice) == num: win=True; mult=36
+    if choice in ["rouge", "red"] and color == "rouge": win = True; mult = 2
+    elif choice in ["noir", "black"] and color == "noir": win = True; mult = 2
+    elif choice in ["vert", "green"] and color == "vert": win = True; mult = 14
+    elif choice.isdigit() and int(choice) == num: win = True; mult = 36
 
-    embed = discord.Embed(title="🎡 Roulette", description=f"**{num} ({color.upper()})**", color=COL_BLUE)
+    embed = discord.Embed(title="🎡 Roulette", description=f"Résultat : **{num} ({color.upper()})**", color=COL_BLUE)
     
     if win:
         profit = amount * mult
         db[uid] += (profit - amount)
         embed.color = COL_GREEN
-        embed.add_field(name="GAGNÉ", value=f"+{profit}")
+        embed.add_field(name="RÉSULTAT", value=f"🎉 **GAGNÉ !** Tu remportes **{profit:,}**")
     else:
         db[uid] -= amount
         embed.color = COL_RED
-        embed.add_field(name="PERDU", value=f"-{amount}")
+        embed.add_field(name="RÉSULTAT", value=f"❌ **PERDU.** Tu perds **{amount:,}**")
     
     save_db(db)
-    await ctx.send(embed=embed)
+    await msg.edit(embed=embed)
 
-# --- 8. MORPION ---
+# --- 8. MORPION (Intact) ---
 class MorpionButton(discord.ui.Button):
     def __init__(self, x, y):
         super().__init__(style=discord.ButtonStyle.secondary, label="‎", row=y)
-        self.x = x
-        self.y = y
+        self.x, self.y = x, y
 
     async def callback(self, interaction: discord.Interaction):
         view = self.view
@@ -440,7 +463,7 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
     view.add_item(btn)
     await ctx.send(f"{opponent.mention}, duel de Morpion pour {mise} coins ?", view=view)
 
-# --- 9. BLACKJACK ---
+# --- 9. BLACKJACK (Intact) ---
 class BlackjackView(discord.ui.View):
     def __init__(self, author_id, amount):
         super().__init__(timeout=60)
@@ -525,10 +548,10 @@ async def race(ctx):
     
     msg = await ctx.send("🏁 **C'EST PARTI !**")
     track = ["🐎", "🦄", "🦓", "🐖", "🐆"]
-    for _ in range(3):
+    for _ in range(4): # Animation un peu plus longue
         await asyncio.sleep(1.5)
         random.shuffle(track)
-        await msg.edit(content="\n".join([f"{i+1}. {t} 💨" for i, t in enumerate(track)]))
+        await msg.edit(content="\n".join([f"{i+1}. {t} {'💨' * random.randint(1,3)}" for i, t in enumerate(track)]))
         
     winner = random.randint(1, 5)
     db = load_db()
@@ -536,9 +559,9 @@ async def race(ctx):
     
     for b in race_bets:
         if b['horse'] == winner:
-            gain = b['amount'] * 3
+            gain = b['amount'] * 4 # Gain boosté à x4 pour équilibrer la chance de 1/5
             db[str(b['uid'])] = db.get(str(b['uid']), 0) + gain
-            res += f"✅ <@{b['uid']}> gagne {gain} coins !\n"
+            res += f"✅ <@{b['uid']}> gagne {gain:,} coins !\n"
             
             k = f"{b['uid']}_race_wins"
             db[k] = db.get(k, 0) + 1
@@ -562,13 +585,15 @@ async def bet(ctx, amount_str: str, horse: int):
     
     db[uid] -= amount; save_db(db)
     race_bets.append({'uid': ctx.author.id, 'amount': amount, 'horse': horse})
-    await ctx.send(f"🎟️ Pari de {amount} sur #{horse}.")
+    await ctx.send(f"🎟️ Pari de {amount:,} coins sur le cheval #{horse}.")
 
 # --- 11. BOUTIQUE ---
 @bot.command()
 async def shop(ctx):
-    e = discord.Embed(title="🛒 BOUTIQUE", color=COL_BLUE)
-    for k, v in SHOP_ITEMS.items(): e.add_field(name=k.upper(), value=f"💰 {v:,} coins", inline=False)
+    e = discord.Embed(title="🛒 BOUTIQUE DU CASINO", color=COL_BLUE)
+    e.description = "Achète des rôles pour prouver ta richesse ou débloquer des commandes !"
+    for k, v in SHOP_ITEMS.items(): e.add_field(name=f"👑 Rôle {k.capitalize()}", value=f"💰 **{v:,} coins**", inline=False)
+    e.set_footer(text="Tape !buy <nom_du_role>")
     await ctx.send(embed=e)
 
 @bot.command()
@@ -580,17 +605,17 @@ async def buy(ctx, item: str):
     
     if db.get(uid, 0) < price: return await ctx.send("❌ Pas assez d'argent.")
     role = discord.utils.get(ctx.guild.roles, name=item)
-    if not role: return await ctx.send(f"❌ Rôle '{item}' introuvable sur le serveur.")
+    if not role: return await ctx.send(f"❌ Rôle '{item}' introuvable sur le serveur Discord.")
     
     await ctx.author.add_roles(role)
     db[uid] -= price; save_db(db)
-    await ctx.send(f"✅ Tu as acheté **{item}** !")
+    await ctx.send(f"✅ Transaction réussie ! Tu es maintenant **{item.capitalize()}** !")
 
 # --- 12. ERREURS ---
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏳ Attends encore {int(error.retry_after)}s.")
+        await ctx.send(f"⏳ Attends encore {int(error.retry_after)} secondes.")
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ Tu n'as pas la permission.")
     else: print(error)
@@ -598,18 +623,14 @@ async def on_command_error(ctx, error):
 
 # --- DÉMARRAGE RENDER ---
 if __name__ == "__main__":
-    # 1. On lance Flask instantanément pour que Render soit content
-    port = int(os.environ.get("PORT", 8080))
-    # On utilise un thread pour ne pas bloquer le bot
+    port = int(os.environ.get("PORT", 10000))
     web_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False))
     web_thread.daemon = True
     web_thread.start()
     print(f"🚀 Serveur Web activé sur le port {port}")
 
-    # 2. On attend 5 secondes pour laisser le réseau se stabiliser
     time.sleep(5)
 
-    # 3. On lance le bot
     token = os.environ.get('TOKEN')
     if token:
         try:
@@ -618,4 +639,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erreur de connexion : {e}")
     else:
-        print("❌ Erreur : TOKEN introuvable dans les variables d'environnement.")
+        print("❌ Erreur : TOKEN introuvable.")
