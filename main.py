@@ -17,7 +17,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora Casino est en ligne (vFinal - Animé & Équilibré) !"
+    return "Pandora est en ligne (vFinal - Animé & Équilibré) !"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
