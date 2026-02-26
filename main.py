@@ -9,7 +9,7 @@ from flask import Flask
 from threading import Thread
 import logging
 
-# --- 1. KEEP ALIVE (FIX RENDER APPLIQUÉ ICI) ---
+# --- 1. CONFIGURATION DU SERVEUR WEB (FIX RENDER) ---
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
@@ -19,17 +19,12 @@ app = Flask('')
 def home():
     return "Pandora Casino est en ligne (vFinal - Patched) !"
 
-def run():
-    # RENDER FIX : Utilisation du port dynamique de Render au lieu de forcer 8080
+def run_web_server():
+    # Render impose d'écouter sur 0.0.0.0 et sur le port de sa variable d'env
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 
-def keep_alive():
-    t = Thread(target=run)
-    t.daemon = True
-    t.start()
-
-# --- 2. CONFIGURATION ---
+# --- 2. CONFIGURATION BOT ET BDD ---
 DB_FILE = "database.json"
 TAX_RATE = 0.05 
 
@@ -196,7 +191,6 @@ async def admintake(ctx, member: discord.Member, amount: int):
     db = load_db()
     uid = str(member.id)
     current = db.get(uid, 0)
-    # On s'assure de ne pas descendre en dessous de 0
     new_bal = max(0, current - amount)
     db[uid] = new_bal
     save_db(db)
@@ -237,10 +231,8 @@ async def dice(ctx, amount_str: str):
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     
-    # SECURITE ANTI DETTE
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
-    # TRUCAGE 70%
     if random.random() < 0.70:
         p_score = random.randint(7, 12)
         b_score = random.randint(2, p_score - 1)
@@ -271,7 +263,6 @@ async def slot(ctx, amount_str: str):
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     
-    # SECURITE ANTI DETTE
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
     symbols_common = ["🍒", "💎", "🍇", "🔔"]
@@ -279,20 +270,17 @@ async def slot(ctx, amount_str: str):
     user_roles = [r.name.lower() for r in ctx.author.roles]
     win_rate = 0.80 if "hakari" in user_roles else 0.55
 
-    # LOGIQUE REVISÉE POUR BAISSER LE JACKPOT ET PERMETTRE DES SOMMES ASTRONOMIQUES
+    # LOGIQUE REVISÉE : 0.1% de chance d'avoir le jackpot x1000
     if random.random() < win_rate:
-        # Seulement 0.1% de chance (1 sur 1000) d'avoir le 777 SI on gagne
         if random.random() < 0.001:
             s = "7️⃣"
-            mult = 1000 # <-- MULTIPLICATEUR ASTRONOMIQUE (x1000)
+            mult = 1000
         else:
             s = random.choice(symbols_common)
-            mult = 10 # Gain normal pour ne pas casser l'économie
+            mult = 10 
         res = [s, s, s]
     else:
-        # Perdu
         res = random.sample(symbols_common + ["7️⃣"], 3)
-        # Eviter accidentellement 3 pareils
         while res[0] == res[1] == res[2]:
             res = random.sample(symbols_common + ["7️⃣"], 3)
         mult = 0
@@ -329,7 +317,6 @@ async def roulette(ctx, amount_str: str, choice: str):
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     
-    # SECURITE ANTI DETTE
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
 
     choice = choice.lower()
@@ -434,7 +421,6 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
     except: mise = 0
     
     if mise > 0:
-        # SECURITE ANTI DETTE
         if db.get(str(ctx.author.id),0) < mise: return await ctx.send("Tu n'as pas assez d'argent.")
         if db.get(str(opponent.id),0) < mise: return await ctx.send("L'adversaire n'a pas assez.")
 
@@ -444,7 +430,6 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
         if interaction.user != opponent: return
         if mise > 0:
             curr_db = load_db()
-            # Double check au moment d'accepter
             if curr_db.get(str(ctx.author.id),0) < mise or curr_db.get(str(opponent.id),0) < mise:
                 return await interaction.response.send_message("❌ Fonds insuffisants.", ephemeral=True)
             curr_db[str(ctx.author.id)] -= mise
@@ -516,7 +501,6 @@ async def blackjack(ctx, amount_str: str):
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     
-    # SECURITE ANTI DETTE
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
     
     db[uid] -= amount
@@ -574,7 +558,6 @@ async def bet(ctx, amount_str: str, horse: int):
     amount = parse_amount(amount_str, db.get(uid, 0))
     if amount <= 0: return await ctx.send("❌ Mise invalide.")
     
-    # SECURITE ANTI DETTE
     if db.get(uid, 0) < amount: return await ctx.send("❌ Pas assez d'argent !")
     
     db[uid] -= amount; save_db(db)
@@ -612,7 +595,22 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ Tu n'as pas la permission.")
     else: print(error)
 
-# LANCEMENT
-keep_alive()
-try: bot.run(os.environ.get('TOKEN'))
-except: pass
+
+# --- 13. DÉMARRAGE SÉCURISÉ POUR RENDER ---
+if __name__ == "__main__":
+    # 1. On lance le serveur Web en premier pour satisfaire Render
+    print("🌐 Démarrage du serveur Web...")
+    web_thread = Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
+
+    # 2. On lance le bot Discord
+    token = os.environ.get('TOKEN')
+    if token:
+        print("🤖 Connexion à Discord...")
+        try:
+            bot.run(token)
+        except Exception as e:
+            print(f"❌ Erreur critique : {e}")
+    else:
+        print("❌ ERREUR : La variable d'environnement 'TOKEN' est introuvable sur Render.")
