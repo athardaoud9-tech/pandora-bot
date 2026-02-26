@@ -21,7 +21,7 @@ def home():
 
 def run_web_server():
     # Render impose d'écouter sur 0.0.0.0 et sur le port de sa variable d'env
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, use_reloader=False)
 
 # --- 2. CONFIGURATION BOT ET BDD ---
