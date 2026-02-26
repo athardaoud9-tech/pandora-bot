@@ -9,7 +9,7 @@ from flask import Flask
 from threading import Thread
 import logging
 
-# --- 1. KEEP ALIVE ---
+# --- 1. KEEP ALIVE (FIX RENDER APPLIQUÉ ICI) ---
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
@@ -20,7 +20,9 @@ def home():
     return "Pandora Casino est en ligne (vFinal - Patched) !"
 
 def run():
-    app.run(host='0.0.0.0', port=8080, use_reloader=False)
+    # RENDER FIX : Utilisation du port dynamique de Render au lieu de forcer 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
 
 def keep_alive():
     t = Thread(target=run)
@@ -277,16 +279,15 @@ async def slot(ctx, amount_str: str):
     user_roles = [r.name.lower() for r in ctx.author.roles]
     win_rate = 0.80 if "hakari" in user_roles else 0.55
 
-    # LOGIQUE REVISÉE POUR BAISSER LE JACKPOT
+    # LOGIQUE REVISÉE POUR BAISSER LE JACKPOT ET PERMETTRE DES SOMMES ASTRONOMIQUES
     if random.random() < win_rate:
-        # On gagne, mais est-ce un gros lot ?
-        # Seulement 5% de chance d'avoir le 777 SI on gagne
-        if random.random() < 0.05:
+        # Seulement 0.1% de chance (1 sur 1000) d'avoir le 777 SI on gagne
+        if random.random() < 0.001:
             s = "7️⃣"
-            mult = 100
+            mult = 1000 # <-- MULTIPLICATEUR ASTRONOMIQUE (x1000)
         else:
             s = random.choice(symbols_common)
-            mult = 20
+            mult = 10 # Gain normal pour ne pas casser l'économie
         res = [s, s, s]
     else:
         # Perdu
