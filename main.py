@@ -598,19 +598,24 @@ async def on_command_error(ctx, error):
 
 # --- DÉMARRAGE RENDER ---
 if __name__ == "__main__":
-    # Lancement immédiat du serveur Web
+    # 1. On lance Flask instantanément pour que Render soit content
     port = int(os.environ.get("PORT", 8080))
+    # On utilise un thread pour ne pas bloquer le bot
     web_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False))
     web_thread.daemon = True
     web_thread.start()
-    print(f"🚀 Serveur Web lancé sur le port {port}")
+    print(f"🚀 Serveur Web activé sur le port {port}")
 
-    # Lancement du bot
+    # 2. On attend 5 secondes pour laisser le réseau se stabiliser
+    time.sleep(5)
+
+    # 3. On lance le bot
     token = os.environ.get('TOKEN')
     if token:
         try:
+            print("🤖 Tentative de connexion à Discord...")
             bot.run(token)
         except Exception as e:
             print(f"❌ Erreur de connexion : {e}")
     else:
-        print("❌ Erreur : Variable TOKEN manquante dans l'onglet Environment de Render.")
+        print("❌ Erreur : TOKEN introuvable dans les variables d'environnement.")
