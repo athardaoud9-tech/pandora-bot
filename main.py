@@ -596,21 +596,21 @@ async def on_command_error(ctx, error):
     else: print(error)
 
 
-# --- 13. DÉMARRAGE SÉCURISÉ POUR RENDER ---
+# --- DÉMARRAGE RENDER ---
 if __name__ == "__main__":
-    # 1. On lance le serveur Web en premier pour satisfaire Render
-    print("🌐 Démarrage du serveur Web...")
-    web_thread = Thread(target=run_web_server)
+    # Lancement immédiat du serveur Web
+    port = int(os.environ.get("PORT", 8080))
+    web_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False))
     web_thread.daemon = True
     web_thread.start()
+    print(f"🚀 Serveur Web lancé sur le port {port}")
 
-    # 2. On lance le bot Discord
+    # Lancement du bot
     token = os.environ.get('TOKEN')
     if token:
-        print("🤖 Connexion à Discord...")
         try:
             bot.run(token)
         except Exception as e:
-            print(f"❌ Erreur critique : {e}")
+            print(f"❌ Erreur de connexion : {e}")
     else:
-        print("❌ ERREUR : La variable d'environnement 'TOKEN' est introuvable sur Render.")
+        print("❌ Erreur : Variable TOKEN manquante dans l'onglet Environment de Render.")
