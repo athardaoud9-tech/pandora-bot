@@ -39,9 +39,9 @@ LEAVE_CHANNEL_ID = 1470177322161147914
 
 # 🛒 BOUTIQUE (PRIX ÉQUILIBRÉS)
 SHOP_ITEMS = {
-    "juif": 100000,         # 100k (Accessible)
-    "riche": 5000000,       # 5M (Difficile)
-    "roi": 50000000         # 50M (Objectif ultime)
+    "juif": 100000,         # 100k
+    "riche": 5000000,       # 5M
+    "roi": 50000000         # 50M
 }
 
 # --- 3. FONCTIONS UTILES ---
@@ -184,16 +184,17 @@ async def admingive(ctx, member: discord.Member, amount: int):
     save_db(db)
     await ctx.send(f"✅ **{amount:,} coins** donnés à {member.mention}.")
 
+# --- CHANGEMENT ICI : admintake -> impots ---
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def admintake(ctx, member: discord.Member, amount: int):
+async def impots(ctx, member: discord.Member, amount: int):
     db = load_db()
     uid = str(member.id)
     current = db.get(uid, 0)
     new_bal = max(0, current - amount)
     db[uid] = new_bal
     save_db(db)
-    await ctx.send(f"📉 **{amount:,} coins** retirés à {member.mention}. (Nouveau solde: {new_bal:,})")
+    await ctx.send(f"🏛️ **L'État a prélevé des impôts !**\n📉 **{amount:,} coins** ont été retirés à {member.mention}. (Nouveau solde: {new_bal:,})")
 
 @bot.command()
 @commands.cooldown(1, 1200, commands.BucketType.user)
@@ -221,7 +222,7 @@ async def rob(ctx, member: discord.Member):
         save_db(db)
         await ctx.send(embed=discord.Embed(description=f"👮 Attrapé ! Amende de **{fine} coins**.", color=COL_RED))
 
-# --- 7. JEUX AVEC ANIMATIONS ET ODDS RÉALISTES ---
+# --- 7. JEUX ---
 
 @bot.command()
 async def dice(ctx, amount_str: str):
@@ -300,7 +301,6 @@ async def slot(ctx, amount_str: str):
         embed.color = COL_GREEN
         embed.add_field(name="RÉSULTAT", value=f"🎉 **JACKPOT !** Tu gagnes **{profit:,} coins** (x{mult})")
         
-        # HAKARI (5 fois d'affilée minimum)
         db[streak_key] = db.get(streak_key, 0) + 1
         if db[streak_key] >= 5:
             role = discord.utils.get(ctx.guild.roles, name="Hakari")
@@ -309,7 +309,7 @@ async def slot(ctx, amount_str: str):
                 embed.add_field(name="🔥 HAKARI", value="Rôle débloqué !", inline=False)
     else:
         db[uid] -= amount
-        db[streak_key] = 0 # Retour à 0 si on perd (pour forcer 5x d'affilée)
+        db[streak_key] = 0 
         embed.color = COL_RED
         embed.add_field(name="RÉSULTAT", value=f"❌ **PERDU.** (-{amount:,} coins)")
 
@@ -360,7 +360,7 @@ async def roulette(ctx, amount_str: str, choice: str):
     save_db(db)
     await msg.edit(embed=embed)
 
-# --- 8. MORPION (Intact) ---
+# --- 8. MORPION ---
 class MorpionButton(discord.ui.Button):
     def __init__(self, x, y):
         super().__init__(style=discord.ButtonStyle.secondary, label="‎", row=y)
@@ -445,7 +445,7 @@ async def morpion(ctx, opponent: discord.Member, amount_str: str="0"):
     view.add_item(btn)
     await ctx.send(f"{opponent.mention}, duel de Morpion pour {mise} coins ?", view=view)
 
-# --- 9. BLACKJACK (Corrigé) ---
+# --- 9. BLACKJACK ---
 class BlackjackView(discord.ui.View):
     def __init__(self, author_id, amount):
         super().__init__(timeout=60)
@@ -511,7 +511,6 @@ async def blackjack(ctx, amount_str: str):
     db[uid] -= amount
     save_db(db)
     
-    # FIX : On affiche la main dès le lancement de la commande
     view = BlackjackView(ctx.author.id, amount)
     e = discord.Embed(title="🃏 Blackjack", color=COL_BLUE)
     e.add_field(name=f"Toi ({view.calc(view.player)})", value=str(view.player))
@@ -519,7 +518,7 @@ async def blackjack(ctx, amount_str: str):
     
     await ctx.send(embed=e, view=view)
 
-# --- 10. COURSE (RACE) ---
+# --- 10. COURSE ---
 race_open = False
 race_bets = []
 
@@ -610,15 +609,13 @@ async def on_command_error(ctx, error):
     else: print(error)
 
 
-# --- DÉMARRAGE (REMPLACEMENT COMPLET) ---
+# --- DÉMARRAGE ---
 if __name__ == "__main__":
-    # 1. On lance le serveur web Flask dans un thread pour que Render reste content
     t = Thread(target=run_web_server)
     t.daemon = True
     t.start()
     print("🚀 Serveur Web de secours activé sur le port 10000")
 
-    # 2. On récupère le TOKEN et on lance le bot Discord
     token = os.environ.get('TOKEN')
     if token:
         try:
@@ -626,4 +623,4 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"❌ Erreur critique lors du lancement du bot : {e}")
     else:
-        print("❌ Erreur : Le TOKEN est introuvable dans les variables d'environnement de Render.")
+        print("❌ Erreur : Le TOKEN est introuvable.")
