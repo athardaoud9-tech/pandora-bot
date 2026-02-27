@@ -6,7 +6,7 @@ import random
 import json
 import asyncio
 from flask import Flask
-from threading import Thread, Lock
+from threading import Thread
 import logging
 
 # --- 1. CONFIGURATION DU SERVEUR WEB (FIX RENDER) ---
@@ -17,7 +17,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora est en ligne (vFinal - Animé & Équilibré) !"
+    return "Pandora Casino est en ligne (vFinal - Animé & Équilibré) !"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -47,19 +47,15 @@ SHOP_ITEMS = {
 }
 
 # --- 3. FONCTIONS UTILES ---
-db_lock = Lock() # Sécurité contre la corruption de données simultanée
-
 def load_db():
-    with db_lock:
-        if not os.path.exists(DB_FILE):
-            with open(DB_FILE, "w") as f: json.dump({}, f)
-        with open(DB_FILE, "r") as f:
-            try: return json.load(f)
-            except: return {}
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w") as f: json.dump({}, f)
+    with open(DB_FILE, "r") as f:
+        try: return json.load(f)
+        except: return {}
 
 def save_db(data):
-    with db_lock:
-        with open(DB_FILE, "w") as f: json.dump(data, f, indent=4)
+    with open(DB_FILE, "w") as f: json.dump(data, f, indent=4)
 
 def parse_amount(amount_str, balance):
     if str(amount_str).lower() in ["all", "tout"]: return int(balance)
@@ -71,7 +67,7 @@ def parse_amount(amount_str, balance):
 # --- 4. ÉVÉNEMENTS ---
 @bot.event
 async def on_ready():
-    # Retrait du bot.tree.sync() ici pour éviter les crashs/rate-limits de Discord au démarrage
+    await bot.tree.sync()
     print(f"✅ Connecté : {bot.user}")
     await bot.change_presence(activity=discord.Game(name="!helpme | Casino V2"))
 
@@ -115,7 +111,7 @@ async def helpme(ctx):
         color=COL_GOLD
     )
     embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else "")
-    embed.add_field(name="💰 ÉCONOMIE", value="`!bal` : Voir ton solde\n`!work` : Travailler (toutes les 10m)\n`!daily` : Cadeau quotidien\n`!top` : Top 10 des riches\n`!give @user <montant>` : Donner de l'argent", inline=False)
+    embed.add_field(name="💰 ÉCONOMIE", value="`!bal` : Voir ton solde\n`!work` : Travailler (toutes les 10m)\n`!daily` : Cadeau quotidien\n`!leaderboard` : Top 10 des riches\n`!give @user <montant>` : Donner de l'argent", inline=False)
     embed.add_field(name="🎰 JEUX DE HASARD", value="`!slot <mise>` : Machine à sous\n`!dice <mise>` : Duel de dés\n`!roulette <mise> <choix>` : Roulette", inline=False)
     embed.add_field(name="🃏 STRATÉGIE & DEFIS", value="`!blackjack <mise>` : Atteins 21 sans sauter\n`!morpion @user <mise>` : Duel tactique", inline=False)
     embed.add_field(name="🏇 PARIS HIPPIQUES", value="`!race` : Lance une course\n`!bet <mise> <n°>` : Parie sur ton favori", inline=False)
@@ -124,40 +120,16 @@ async def helpme(ctx):
     await ctx.send(embed=embed)
 
 # --- 6. ÉCONOMIE ---
-@bot.command(aliases=["leaderboard", "rich"])
-async def top(ctx):
+@bot.command(aliases=["top", "rich"])
+async def leaderboard(ctx):
     db = load_db()
-    users = []
-    for uid_str, bal in db.items():
-        if uid_str.isdigit() and isinstance(bal, (int, float)):
-            member = ctx.guild.get_member(int(uid_str))
-            # On vérifie si le membre existe toujours sur le serveur (anti-fantômes) et si ce n'est pas un bot
-            if member is not None and not member.bot:
-                users.append((member, bal))
-    
+    users = [(k, v) for k, v in db.items() if k.isdigit() and isinstance(v, (int, float))]
     users.sort(key=lambda x: x[1], reverse=True)
-    
-    embed = discord.Embed(
-        title="🏆 CLASSEMENT DES PLUS RICHES 🏆", 
-        description="Voici l'élite financière du serveur :",
-        color=COL_GOLD
-    )
-    
-    if not users:
-        embed.description = "Le classement est vide ! Jouez pour le remplir."
-    
-    for idx, (member, bal) in enumerate(users[:10], 1):
-        medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"**{idx}.**"
-        embed.add_field(
-            name=f"{medal} {member.display_name}", 
-            value=f"💎 **{int(bal):,} coins**", 
-            inline=False
-        )
-    
-    embed.set_thumbnail(url=ctx.guild.icon.url if ctx.guild.icon else (bot.user.avatar.url if bot.user.avatar else ""))
-    embed.set_footer(text=f"Pandora Casino • Demandé par {ctx.author.display_name}")
-    
-    await ctx.send(embed=embed)
+    desc = ""
+    for idx, (uid, bal) in enumerate(users[:10], 1):
+        medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"{idx}."
+        desc += f"**{medal} <@{uid}>** : {int(bal):,} coins\n"
+    await ctx.send(embed=discord.Embed(title="🏆 CLASSEMENT", description=desc if desc else "Vide", color=COL_GOLD))
 
 @bot.command()
 async def bal(ctx, member: discord.Member = None):
@@ -216,14 +188,14 @@ async def admingive(ctx, member: discord.Member, amount: int):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def impots(ctx, member: discord.Member, amount: int):
+async def admintake(ctx, member: discord.Member, amount: int):
     db = load_db()
     uid = str(member.id)
     current = db.get(uid, 0)
     new_bal = max(0, current - amount)
     db[uid] = new_bal
     save_db(db)
-    await ctx.send(f"🏛️ **L'État d'Israel a prélevé des impôts !**\n📉 **{amount:,} coins** ont été retirés à {member.mention}. (Nouveau solde: {new_bal:,})")
+    await ctx.send(f"📉 **{amount:,} coins** retirés à {member.mention}. (Nouveau solde: {new_bal:,})")
 
 @bot.command()
 @commands.cooldown(1, 1200, commands.BucketType.user)
@@ -233,16 +205,11 @@ async def rob(ctx, member: discord.Member):
         ctx.command.reset_cooldown(ctx)
         return await ctx.send(embed=discord.Embed(description="⛔ Rôle **Juif** requis (Boutique) !", color=COL_RED))
 
-    if member.bot or member == ctx.author: 
-        ctx.command.reset_cooldown(ctx)
-        return await ctx.send("❌ Tu ne peux pas voler cette personne.")
-        
+    if member.bot or member == ctx.author: return
     db = load_db()
     vic_bal = db.get(str(member.id), 0)
     
-    if vic_bal < 1000: 
-        ctx.command.reset_cooldown(ctx)
-        return await ctx.send("❌ Il est trop pauvre (moins de 1000).")
+    if vic_bal < 1000: return await ctx.send("❌ Il est trop pauvre (moins de 1000).")
     
     if random.random() < 0.45:
         stolen = int(vic_bal * random.uniform(0.05, 0.15))
@@ -564,47 +531,42 @@ async def race(ctx):
     if race_open: return await ctx.send("⚠️ Course en cours.")
     race_open = True; race_bets = []
     
-    try:
-        await ctx.send("🏇 **Début des paris !** Tape `!bet <mise> <cheval 1-5>`. (20s)")
-        await asyncio.sleep(20)
+    await ctx.send("🏇 **Début des paris !** Tape `!bet <mise> <cheval 1-5>`. (20s)")
+    await asyncio.sleep(20)
+    
+    if not race_bets:
+        race_open = False; return await ctx.send("❌ Course annulée (0 pari).")
+    
+    msg = await ctx.send("🏁 **C'EST PARTI !**")
+    track = ["🐎", "🦄", "🦓", "🐖", "🐆"]
+    for _ in range(4):
+        await asyncio.sleep(1.5)
+        random.shuffle(track)
+        await msg.edit(content="\n".join([f"{i+1}. {t} {'💨' * random.randint(1,3)}" for i, t in enumerate(track)]))
         
-        if not race_bets:
-            return await ctx.send("❌ Course annulée (0 pari).")
-        
-        msg = await ctx.send("🏁 **C'EST PARTI !**")
-        track = ["🐎", "🦄", "🦓", "🐖", "🐆"]
-        for _ in range(4):
-            await asyncio.sleep(1.5)
-            random.shuffle(track)
-            await msg.edit(content="\n".join([f"{i+1}. {t} {'💨' * random.randint(1,3)}" for i, t in enumerate(track)]))
+    winner = random.randint(1, 5)
+    db = load_db()
+    res = f"👑 **Le Cheval #{winner} gagne !**\n"
+    
+    for b in race_bets:
+        if b['horse'] == winner:
+            gain = b['amount'] * 4
+            db[str(b['uid'])] = db.get(str(b['uid']), 0) + gain
+            res += f"✅ <@{b['uid']}> gagne {gain:,} coins !\n"
             
-        winner = random.randint(1, 5)
-        db = load_db()
-        res = f"👑 **Le Cheval #{winner} gagne !**\n"
-        
-        for b in race_bets:
-            if b['horse'] == winner:
-                gain = b['amount'] * 4
-                db[str(b['uid'])] = db.get(str(b['uid']), 0) + gain
-                res += f"✅ <@{b['uid']}> gagne {gain:,} coins !\n"
+            k = f"{b['uid']}_race_wins"
+            db[k] = db.get(k, 0) + 1
+            if db[k] == 10:
+                r = discord.utils.get(ctx.guild.roles, name="Hockey Genius")
+                u = ctx.guild.get_member(b['uid'])
+                if r and u: await u.add_roles(r); res += "🏆 **ROLE HOCKEY GENIUS OBTENU !**\n"
                 
-                k = f"{b['uid']}_race_wins"
-                db[k] = db.get(k, 0) + 1
-                if db[k] == 10:
-                    r = discord.utils.get(ctx.guild.roles, name="Hockey Genius")
-                    u = ctx.guild.get_member(b['uid'])
-                    if r and u: 
-                        await u.add_roles(r)
-                        res += "🏆 **ROLE HOCKEY GENIUS OBTENU !**\n"
-                    
-        save_db(db)
-        await ctx.send(embed=discord.Embed(description=res, color=COL_GOLD))
-    finally:
-        race_open = False  # Sécurité pour que la course ne reste jamais bloquée si une erreur survient
+    save_db(db); race_open = False
+    await ctx.send(embed=discord.Embed(description=res, color=COL_GOLD))
 
 @bot.command()
 async def bet(ctx, amount_str: str, horse: int):
-    if not race_open: return await ctx.send("❌ Pas de course en phase de pari.")
+    if not race_open: return await ctx.send("❌ Pas de course.")
     if not (1 <= horse <= 5): return await ctx.send("❌ Cheval 1-5.")
     db = load_db(); uid = str(ctx.author.id)
     amount = parse_amount(amount_str, db.get(uid, 0))
@@ -644,17 +606,11 @@ async def buy(ctx, item: str):
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏳ Attends encore **{int(error.retry_after)}s** avant de réutiliser cette commande.")
+        await ctx.send(f"⏳ Attends encore {int(error.retry_after)} secondes.")
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ Tu n'as pas la permission d'utiliser cette commande.")
-    elif isinstance(error, commands.MemberNotFound):
-        ctx.command.reset_cooldown(ctx)
-        await ctx.send("❌ Utilisateur introuvable.")
-    elif isinstance(error, commands.BadArgument):
-        ctx.command.reset_cooldown(ctx)
-        await ctx.send("❌ Argument invalide (vérifie ce que tu as tapé).")
-    else: 
-        print(f"Erreur ignorée : {error}")
+    else: print(error)
+
 
 # --- DÉMARRAGE RENDER ---
 if __name__ == "__main__":
