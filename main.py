@@ -10,18 +10,16 @@ from threading import Thread
 import logging
 
 # --- 1. CONFIGURATION DU SERVEUR WEB (FIX RENDER) ---
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
-
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pandora Casino est en ligne (vFinal - Animé & Équilibré) !"
+    return "Pandora Casino est en ligne !"
 
 def run_web_server():
+    # Render utilise le port 10000 par défaut
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, use_reloader=False)
+    app.run(host='0.0.0.0', port=port)
 
 # --- 2. CONFIGURATION BOT ET BDD ---
 DB_FILE = "database.json"
@@ -612,22 +610,20 @@ async def on_command_error(ctx, error):
     else: print(error)
 
 
-# --- DÉMARRAGE RENDER ---
+# --- DÉMARRAGE (REMPLACEMENT COMPLET) ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    web_thread = Thread(target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False))
-    web_thread.daemon = True
-    web_thread.start()
-    print(f"🚀 Serveur Web activé sur le port {port}")
+    # 1. On lance le serveur web Flask dans un thread pour que Render reste content
+    t = Thread(target=run_web_server)
+    t.daemon = True
+    t.start()
+    print("🚀 Serveur Web de secours activé sur le port 10000")
 
-    time.sleep(5)
-
+    # 2. On récupère le TOKEN et on lance le bot Discord
     token = os.environ.get('TOKEN')
     if token:
         try:
-            print("🤖 Tentative de connexion à Discord...")
             bot.run(token)
         except Exception as e:
-            print(f"❌ Erreur de connexion : {e}")
+            print(f"❌ Erreur critique lors du lancement du bot : {e}")
     else:
-        print("❌ Erreur : TOKEN introuvable.")
+        print("❌ Erreur : Le TOKEN est introuvable dans les variables d'environnement de Render.")
